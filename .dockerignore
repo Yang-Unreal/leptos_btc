@@ -6,3 +6,5 @@ Cargo.lock.bak
 end2end/
 dokploy/
 .dockerignore
+.env
+

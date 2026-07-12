@@ -1,4 +1,263 @@
+:root {
+  --bg: #0f172a;
+  --card: #ffffff;
+  --text: #1e293b;
+  --muted: #94a3b8;
+  --primary: #6366f1;
+  --primary-2: #8b5cf6;
+  --border: #e2e8f0;
+  --danger: #ef4444;
+  --shadow: 0 20px 45px -15px rgba(15, 23, 42, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
 body {
-	font-family: sans-serif;
-	text-align: center;
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: radial-gradient(1200px 600px at 50% -10%, #1e293b 0%, var(--bg) 60%);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 16px;
+  gap: 28px;
+}
+
+/* ---- Welcome block ---- */
+h1 {
+  color: #f8fafc;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  text-align: center;
+}
+
+main > button {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 22px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  box-shadow: 0 8px 20px -8px var(--primary);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+main > button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px -8px var(--primary);
+}
+
+/* ---- Todos card ---- */
+.todos {
+  width: 100%;
+  max-width: 480px;
+  background: var(--card);
+  border-radius: 18px;
+  padding: 28px;
+  box-shadow: var(--shadow);
+}
+
+.todos h2 {
+  margin: 0 0 18px;
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text);
+}
+
+/* ---- Add form ---- */
+.todo-form {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.todo-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 14px;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.todo-form input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+.todo-form button {
+  border: 0;
+  border-radius: 10px;
+  padding: 0 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.todo-form button:hover {
+  transform: translateY(-1px);
+}
+
+.todo-form button:active {
+  transform: translateY(0);
+  opacity: 0.9;
+}
+
+/* ---- List ---- */
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.todo-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.todo-list li:hover {
+  border-color: #cbd5e1;
+  background: #fcfcff;
+}
+
+.todo-list li:active {
+  transform: scale(0.995);
+}
+
+.todo-list input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex: none;
+}
+
+.todo-list .title {
+  flex: 1;
+  font-size: 0.98rem;
+  word-break: break-word;
+}
+
+.todo-list li.completed .title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.todo-list .delete {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--danger);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.todo-list .delete:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.todo-list .edit {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: var(--primary);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.todo-list .edit:hover {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.todo-list .edit-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: #f8fafc;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  outline: none;
+}
+
+.todo-list .save,
+.todo-list .cancel {
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.todo-list .save {
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+}
+
+.todo-list .cancel {
+  color: var(--muted);
+  background: #f1f5f9;
+}
+
+.todo-list .save:hover,
+.todo-list .cancel:hover {
+  opacity: 0.9;
+}
+
+/* ---- States ---- */
+.error {
+  color: var(--danger);
+  font-size: 0.9rem;
+  text-align: center;
+  margin: 12px 0;
+}
+
+.todos p {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 12px 0;
 }
