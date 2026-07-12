@@ -4,9 +4,13 @@
 FROM rust:1-slim AS builder
 
 # Build essentials + SSL (axum/tokio need it) + node (for dart-sass & esbuild)
+# `build-essential` + `perl` are required so openssl-sys can compile its
+# vendored OpenSSL from source (FindBin.pm lives in the full perl package).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
         pkg-config \
         libssl-dev \
+        perl \
         curl \
         nodejs \
         npm \
