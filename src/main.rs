@@ -16,8 +16,22 @@ async fn main() {
     use sqlx::postgres::PgPoolOptions;
 
     let conf = get_configuration(None).unwrap();
-    let leptos_options = conf.leptos_options;
+    let mut leptos_options = conf.leptos_options;
+    // In the Docker image, assets live in /app/site. The configured site_root
+    // (relative "target/site") only resolves correctly if LEPTOS_SITE_ROOT is
+    // applied. If that env var isn't picked up, fall back to the known Docker
+    // location so /pkg (CSS, JS, WASM) is actually served.
+    if !std::path::Path::new(leptos_options.site_root.as_ref()).exists() {
+        leptos_options.site_root = std::sync::Arc::from("/app/site");
+    }
     let addr = leptos_options.site_addr;
+
+    // Log the resolved paths so deployment issues are easy to diagnose.
+    log!(
+        "site_root = {:?}, serving on http://{}",
+        leptos_options.site_root,
+        &addr
+    );
 
     // --- Postgres connection pool + run migrations ---
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
