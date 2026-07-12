@@ -17,12 +17,14 @@ RUN rustup target add wasm32-unknown-unknown
 
 WORKDIR /app
 
-# --- dependency cache layer: copy manifests first, then cargo fetch ---
+# --- dependency cache layer: copy manifest first, then cargo fetch ---
 # Empty placeholder sources keep the package valid without compiling our code.
-COPY Cargo.toml Cargo.lock ./
+# Cargo.lock is gitignored in this project, so generate it if absent.
+COPY Cargo.toml ./
 RUN mkdir -p src \
     && printf '' > src/lib.rs \
     && printf 'fn main() {}\n' > src/main.rs \
+    && cargo generate-lockfile \
     && cargo fetch
 
 # Build tooling. Installing into PATH means cargo-leptos reuses these
