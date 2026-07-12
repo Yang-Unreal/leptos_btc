@@ -1,0 +1,8 @@
+target/
+.git/
+.gitignore
+Cargo.lock.bak
+*.log
+end2end/
+dokploy/
+.dockerignore
