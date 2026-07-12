@@ -44,9 +44,18 @@ pub fn App() -> impl IntoView {
 /// A full-stack CRUD example backed by Postgres (via SQLx server functions).
 #[component]
 pub fn Todos() -> impl IntoView {
-    // A signal we bump to force the todo list to refetch after a mutation.
+    // A signal we bump to force the todo list to refetch (server is source of truth).
     let (refetch, set_refetch) = signal(0);
     let todos = Resource::new(move || refetch.get(), |_| get_todos());
+
+    // Local mirror of the list so we can update the UI instantly (optimistic)
+    // instead of waiting for the server round-trip on every mutation.
+    let todos_local = RwSignal::new(None::<Vec<Todo>>);
+    Effect::new(move |_| {
+        if let Some(Ok(list)) = todos.get() {
+            todos_local.set(Some(list));
+        }
+    });
 
     let title_ref = NodeRef::<Input>::new();
 
@@ -62,8 +71,11 @@ pub fn Todos() -> impl IntoView {
     let toggle = Action::new(move |id: &i32| {
         let id = *id;
         async move {
-            toggle_todo(id).await?;
-            set_refetch.update(|n| *n += 1);
+            // Optimistic UI update already happened in the click handler.
+            // Only resync from the server if the request actually failed.
+            if toggle_todo(id).await.is_err() {
+                set_refetch.update(|n| *n += 1);
+            }
             Ok::<(), ServerFnError>(())
         }
     });
@@ -71,8 +83,9 @@ pub fn Todos() -> impl IntoView {
     let delete = Action::new(move |id: &i32| {
         let id = *id;
         async move {
-            delete_todo(id).await?;
-            set_refetch.update(|n| *n += 1);
+            if delete_todo(id).await.is_err() {
+                set_refetch.update(|n| *n += 1);
+            }
             Ok::<(), ServerFnError>(())
         }
     });
@@ -85,8 +98,9 @@ pub fn Todos() -> impl IntoView {
         let id = *id;
         let title = title.clone();
         async move {
-            update_todo(id, title).await?;
-            set_refetch.update(|n| *n += 1);
+            if update_todo(id, title).await.is_err() {
+                set_refetch.update(|n| *n += 1);
+            }
             Ok::<(), ServerFnError>(())
         }
     });
@@ -112,14 +126,9 @@ pub fn Todos() -> impl IntoView {
             </form>
 
             <Transition fallback=move || view! { <p>"Loading todos…"</p> }>
-                {move || match todos.get() {
-                    None => view! { <div>"Loading…"</div> }.into_view().into_any(),
-                    Some(Err(e)) => {
-                        view! { <div class="error">{format!("Error: {}", e)}</div> }
-                            .into_view()
-                            .into_any()
-                    }
-                    Some(Ok(list)) => view! {
+                {move || match (todos.get(), todos_local.get()) {
+                    // Local mirror has data (also covers post-mutation state).
+                    (_, Some(list)) => view! {
                         <div>
                             <ul class="todo-list">
                                 {list
@@ -145,8 +154,19 @@ pub fn Todos() -> impl IntoView {
                                                                     .get()
                                                                     .map(|el| el.value())
                                                                     .unwrap_or_default();
-                                                                update.dispatch((id, value));
+                                                                // Optimistic: update title locally now.
+                                                                todos_local.update(|opt| {
+                                                                    if let Some(list) = opt {
+                                                                        if let Some(t) = list
+                                                                            .iter_mut()
+                                                                            .find(|t| t.id == id)
+                                                                        {
+                                                                            t.title = value.clone();
+                                                                        }
+                                                                    }
+                                                                });
                                                                 set_editing.set(None);
+                                                                update.dispatch((id, value));
                                                             }
                                                         >"Save"</button>
                                                         <button
@@ -160,6 +180,17 @@ pub fn Todos() -> impl IntoView {
                                                             type="checkbox"
                                                             prop:checked=todo.completed
                                                             on:click=move |_| {
+                                                                // Optimistic: flip completed locally now.
+                                                                todos_local.update(|opt| {
+                                                                    if let Some(list) = opt {
+                                                                        if let Some(t) = list
+                                                                            .iter_mut()
+                                                                            .find(|t| t.id == id)
+                                                                        {
+                                                                            t.completed = !t.completed;
+                                                                        }
+                                                                    }
+                                                                });
                                                                 toggle.dispatch(id);
                                                             }
                                                         />
@@ -171,6 +202,12 @@ pub fn Todos() -> impl IntoView {
                                                         <button
                                                             class="delete"
                                                             on:click=move |_| {
+                                                                // Optimistic: remove locally now.
+                                                                todos_local.update(|opt| {
+                                                                    if let Some(list) = opt {
+                                                                        list.retain(|t| t.id != id);
+                                                                    }
+                                                                });
                                                                 delete.dispatch(id);
                                                             }
                                                         >"✕"</button>
@@ -184,7 +221,15 @@ pub fn Todos() -> impl IntoView {
                         </div>
                     }
                     .into_view()
-                    .into_any()
+                    .into_any(),
+                    // Server returned an error and we have nothing cached.
+                    (Some(Err(e)), None) => {
+                        view! { <div class="error">{format!("Error: {}", e)}</div> }
+                            .into_view()
+                            .into_any()
+                    }
+                    // Still loading / reconciling.
+                    _ => view! { <div>"Loading…"</div> }.into_view().into_any(),
                 }}
             </Transition>
         </section>
