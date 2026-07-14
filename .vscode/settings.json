@@ -1,0 +1,6 @@
+{
+  // Leptos 官方模板的推荐设置：让 rust-analyzer 启用“所有”特性来分析代码。
+  // 这样 ssr 和 hydrate 两边的 #[cfg(...)] 代码块都会被激活，
+  // 无论是 main.rs 里的服务器端 main，还是 lib.rs 里的客户端 hydrate 都不会变灰。
+  "rust-analyzer.cargo.features": "all"
+}
