@@ -59,6 +59,7 @@
     "cdylib",
     "Dokploy",
     "TIMESTAMPTZ",
+    "turbofish",
   ],
   "workbench.colorCustomizations": {
     "editorBracketHighlight.foreground1": "#ffd700",
