@@ -12,81 +12,6 @@
 //      UI 会自动重新渲染。这就是 Leptos 不用手动操作 DOM 的原因——你改数据，界面自动跟着变。
 // ============================================================================
 
-// ============================================================================
-// Rust 核心语法深度讲解（一）：函数、可见性与 impl Trait
-// ----------------------------------------------------------------------------
-// 让我们拆解函数签名 pub fn App() -> impl IntoView：
-//   pub fn  - pub 是 public 的缩写，表示这个函数是公开的，其他模块可以导入并调用。
-//   -> impl IntoView - "返回类型 impl Trait"语法：表示函数返回某个实现了 IntoView trait
-//     的类型，但具体类型对调用者隐藏。这让函数可以返回复杂的视图类型而无需写出
-//     完整类型名。Leptos 的 view! 宏展开后的真实类型可能非常复杂，手写这个类型会
-//     让人崩溃，所以用 impl IntoView 让编译器自己去推导。
-//
-// Rust 核心语法深度讲解（二）：Trait（特质）
-// Trait 是 Rust 的"行为契约"，类似于其他语言中的接口（interface）。
-// 它定义了一组方法签名，任何实现了这些方法的类型都被认为"遵守了这个契约"。
-// 例如 IntoView 这个 Trait：任何能被渲染成浏览器视图的类型（组件、HTML 元素等）
-// 都必须实现 IntoView。#[component] 宏会自动为组件实现 IntoView。
-//
-// 为什么 Rust 用 Trait 而不是继承：Rust 没有类和继承机制。
-// Trait 提供了更灵活的组合方式：一个类型可以同时实现多个 Trait，
-// 而且 Trait 还可以提供默认实现（类似 Java 8 的 default 方法）。
-// 这种"组合优于继承"的设计让代码更灵活、更易于维护。
-//
-// 【实战：怎么自己写一个 Trait？】
-// 下面这个例子会完整展示：定义 Trait → 不同类型实现 → 传入不同参数 → 产生不同结果。
-//
-// 场景：一个"支付系统"，不同支付方式（微信、支付宝、银行卡）的"支付"行为不一样，
-// 而且即使同一种方式，传入不同的金额/订单号，结果也不同。
-//
-//   1. 定义一个名为 Payment 的 Trait，要求实现者必须提供 pay 方法
-//   trait Payment {
-//       fn pay(&self, amount: u64, order_id: &str) -> String;
-//   }
-//
-//   2. 定义三个不同的支付方式结构体
-//   struct WeChatPay;
-//   struct Alipay;
-//   struct BankCard;
-//
-//   3. 为不同方式实现 Payment Trait，行为各不相同
-//   impl Payment for WeChatPay {
-//       fn pay(&self, amount: u64, order_id: &str) -> String {
-//           format!("微信支付成功：订单 {}，金额 {} 元", order_id, amount)
-//       }
-//   }
-//
-//   impl Payment for Alipay {
-//       fn pay(&self, amount: u64, order_id: &str) -> String {
-//           format!("支付宝付款成功：订单 {}，金额 {} 元", order_id, amount)
-//       }
-//   }
-//
-//   impl Payment for BankCard {
-//       fn pay(&self, amount: u64, order_id: &str) -> String {
-//           format!("银行卡扣款成功：订单 {}，金额 {} 元", order_id, amount)
-//       }
-//   }
-//
-//   4. 使用 impl Trait 作为参数，传入不同实现者和不同参数
-//   fn process_payment(method: impl Payment, amount: u64, order_id: &str) {
-//       println!("{}", method.pay(amount, order_id));
-//   }
-//
-// 调用示例：
-//   process_payment(WeChatPay, 100, "ORD-001"); // 微信支付成功：订单 ORD-001，金额 100 元
-//   process_payment(Alipay, 200, "ORD-002");    // 支付宝付款成功：订单 ORD-002，金额 200 元
-//   process_payment(BankCard, 300, "ORD-003");  // 银行卡扣款成功：订单 ORD-003，金额 300 元
-//
-// 关键点：同一个函数 process_payment，传入不同的"实现者"会产生完全不同的输出；
-// 即使传入相同的实现者，只要金额或订单号不同，结果也会不同。
-// 这就是 Rust Trait 的多态：通过统一的接口，让不同类型的对象表现出不同的行为。
-//
-// 回到 Leptos：IntoView 也是这样一个 Trait。view! { <div>hello</div> }、
-// view! { <span>world</span> } 是两个完全不同类型的视图，但它们都实现了 IntoView，
-// 所以你的 App 函数可以放心地返回"任意一种"，编译器会自动处理。
-// ============================================================================
-
 // 【Rust 基础语法讲解：use 声明】
 // use 语句把其他模块/库里的类型、函数、trait 等引入当前作用域，这样不用每次都写全名。
 // 例如 leptos::html::Input 引入了 Input 类型，后面直接写 Input 即可。
@@ -99,89 +24,7 @@ use crate::todo::*;       // 引入 Todo 结构体和 5 个服务器函数（get
 // 在 main.rs 里被当作“页面外壳生成器”传给 leptos_routes_with_context。
 // 【为什么需要一个单独的 shell】：SSR 需要一个完整的 <html>…</html> 文档，而不仅是 body 里的
 //   内容。shell 负责 <head>（字符集、视口、注水脚本、meta）和把 <App/> 放进 <body>。
-// 【Rust 基础语法讲解：pub fn + impl IntoView】
-// pub fn 表示这是一个公共函数，可以被其他模块调用。
-// -> impl IntoView 是“返回类型 impl Trait”语法：表示函数返回某个实现了 IntoView trait 的类型，
-//   但具体类型对调用者隐藏。这让函数可以返回复杂的视图类型而无需写出完整类型名。
 pub fn shell(options: LeptosOptions) -> impl IntoView {
-    // view! { ... } 是 Leptos 的声明宏（declarative macro），让你在 Rust 里写类似 HTML 的模板。
-    // 【Rust 核心语法深度讲解：声明宏（Declarative Macros / macro_rules!）】
-    // 宏是"写代码的代码"（元编程），在代码编译之前运行，直接展开成更多的 Rust 代码。
-    // 普通函数有很多限制（参数个数必须固定、不能发明新语法），而宏可以：
-    //   1. 接受可变数量的参数（比如 println!）。
-    // 2. 创造领域特定语言（DSL）。view! 宏允许你直接在 Rust 里写类似 HTML 的标签，
-    //      宏会在编译时把这些标签翻译成一堆复杂的 Rust DOM 操作函数。
-    //
-    // 【实战：怎么自己写一个声明宏？】
-    // 用 macro_rules! 可以定义自己的宏。下面是一个简单的 say_hello 宏：
-    //
-    //   macro_rules! say_hello {
-    //       ($x:expr) => {
-    //           println!("你好，{}！欢迎来到 Rust 世界！", $x);
-    //       };
-    //   }
-    //
-    //   fn main() {
-    //       say_hello!("小明");
-    //       编译时，这一行会被替换成：println!("你好，{}...", "小明");
-    //   }
-    //
-    // 注意宏调用后面必须有 ! 号（如 say_hello!("小明")），这是 Rust 区分宏和普通函数的语法。
-    //
-    // 【Rust 核心语法深度讲解：$x:expr —— 声明宏的片段分类符（Fragment Specifier）】
-    // 在 Rust 的声明宏（macro_rules!）中，$x:expr 是最核心、最常用的语法匹配占位符。
-    // 它可以拆成三部分来彻底看懂：
-    //   $    - 元变量前缀：告诉编译器"后面紧跟的不是普通变量，而是宏系统的占位符"。
-    //          如果不加 $，编译器会把 x 当作普通字母来匹配，只能匹配代码里真正写着 x 的地方。
-    //   x    - 占位符名字：自定义的名字，在宏的展开体中通过这个名字引用匹配到的内容。
-    //         完全可以换成 $val、$name 或 $my_awesome_expression。
-    //   :expr - 片段分类符：限制这个占位符能匹配什么样代码的"类型约束"。
-    //           expr = Expression（表达式），表示"任何能求出一个值的 Rust 代码"。
-    //
-    // 在 Rust 中，几乎一切皆表达式（执行后都会返回一个值）：
-    //   - 字面量：42、"hello"、true
-    //   - 数学运算：2 + 3 * 5
-    //   - 函数或方法调用：get_user_id()、vec.len()
-    //   - 控制流：if age > 18 { "Adult" } else { "Kid" } （Rust 里 if 是表达式！）
-    //   - 代码块：{ let temp = 10; temp * 2 } （最后一行不加分号，整个块返回值）
-    //
-    // ❌ 哪些不能被 :expr 匹配？
-    //   - 类型定义：i32、String（应该用 :ty）
-    //   - 变量声明语句：let a = 5;（以分号结尾的是语句 Statement，应该用 :stmt）
-    //   - 完整的函数定义：fn foo() {}（应该用 :item）
-    //
-    // 常见的分类符速查表：
-    //   :expr  - Expression      表达式（能产生值的代码）    如 5 * 5、if true { 1 } else { 0 }
-    //   :ident - Identifier      标识符（变量名、函数名）    如 my_var、App、foo
-    //   :ty    - Type             类型                        如 i32、Vec<String>
-    //   :stmt  - Statement        单条语句                    如 let x = 5;
-    //   :block - Block            由 {} 包裹的代码块          如 { println!("hi"); 42 }
-    //   :path  - Path             命名路径                    如 std::collections::HashMap
-    //   :tt    - Token Tree       万能匹配                    几乎任何合法的 Rust 符号
-    //
-    // 一句话总结：$x:expr 就是宏系统里的一个"强力捕手"，专门负责在编译前抓住任何
-    // 能算出值来的 Rust 表达式，并将其命名为 $x，供你在展开体中肆意揉捏和生成代码。
-    //
-    // 【实战：为什么一定要区分这些分类符？—— 宏的对比示例】
-    // 如果把 :expr 换成其他的分类符，会发生什么。假设我们写一个宏，用来打印传进去的东西：
-    //
-    //   macro_rules! print_it {
-    //       匹配表达式
-    //       (expr => $x:expr) => {
-    //           println!("表达式的值是: {}", $x);
-    //       };
-    //       匹配标识符（比如变量名、函数名，不能带任何运算）
-    //       (ident => $x:ident) => {
-    //           println!("变量的名字是: {}", stringify!($x));
-    //       };
-    //   }
-    //
-    //   fn main() {
-    //       let my_age = 18;
-    //       print_it!(ident => my_age);    // 成功！匹配标识符
-    //       print_it!(expr => my_age + 2); // 成功！匹配表达式
-    //       print_it!(ident => my_age + 2); // ❌ 报错！不是单一标识符
-    //   }
     view! {
         <!DOCTYPE html>
         <html lang="en">
@@ -206,91 +49,16 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
     }
 }
 
-// 【Rust 核心语法深度讲解：属性宏（Attribute Macros）】
-// #[component] 是一个属性宏，属于"过程宏（Procedural Macro）"的一种。
-// 过程宏分为三类：属性宏（#[...]）、函数宏（#[...] 用在 fn 上）、派生宏（#[derive(...)]）。
-// 属性宏像狗皮膏药一样贴在函数、结构体等定义的上方。
-//
-// 普通声明宏（macro_rules!）只能"展开"新代码，而属性宏可以：
-//   直接拿到它所修饰的代码，将其解构、修改，然后重新吐出全新的代码。
-// 这就是为什么说属性宏是"代码篡改器"——它们拥有对 AST（抽象语法树）的完全控制权。
-//
-// 为什么 Leptos 需要 #[component]？
-// 在前端，一个组件需要处理很多事情：接收属性（Props）、处理响应式更新、
-// 与服务端进行交互等。如果手写这些，你需要写大量的底层样板代码。
-// #[component] 宏偷偷把你的 pub fn App() 改造了：
-//   1. 生成一个专属于该组件的结构体
-//   2. 把函数参数变成结构体字段（即 Props）
-//   3. 实现 IntoView trait，让这个函数可以在 view! 里像 HTML 标签一样使用
-//   4. 生成属性解析器，处理父组件传进来的参数
-// 从而极大地简化了开发。你在代码里看到的简洁函数签名，背后是宏生成的复杂样板。
-//
-// 注意：写过程宏需要单独建一个特殊的 Cargo 项目（proc-macro = true），
-// 并使用 syn（解析 Rust 代码为 AST）和 quote（把 AST 转回代码）这两个库。
-// 但作为使用者，你只需要知道#[component]会帮你自动生成这些样板代码即可。
-//
-// 【实战：怎么自己写一个属性宏？】
-// 下面展示一个简单的 my_log_attribute 属性宏的核心逻辑：
-//
-//   use proc_macro::TokenStream;
-//   use quote::quote;
-//   use syn::{parse_macro_input, ItemFn};
-//
-//   #[proc_macro_attribute]
-//   pub fn my_log_attribute(_attr: TokenStream, item: TokenStream) -> TokenStream {
-//       1. 将输入的代码解析为一个函数 (ItemFn)
-//       let input_fn = parse_macro_input!(item as ItemFn);
-//       let fn_name = &input_fn.sig.ident;
-//       let fn_block = &input_fn.block;
-//       let fn_vis = &input_fn.vis;
-//       let fn_sig = &input_fn.sig;
-//
-//       2. 重新构造这个函数，在它执行前加一行打印
-//       let expanded = quote! {
-//           #fn_vis #fn_sig {
-//               println!("警告：开始执行函数 [{}] ...", stringify!(#fn_name));
-//               #fn_block
-//           }
-//       };
-//
-//       3. 将新生成的代码转回 TokenStream 给编译器
-//       TokenStream::from(expanded)
-//   }
-//
-// 当你在普通代码里使用它时：
-//
-//   #[my_log_attribute]
-//   fn do_something() {
-//       println!("正在工作...");
-//   }
-//
-// 编译时，这段代码就会被重写成：
-//
-//   fn do_something() {
-//       println!("警告：开始执行函数 [do_something] ...");
-//       println!("正在工作...");
-//   }
-//
-// 这就是属性宏的本质：输入 Rust 代码，输出修改后的 Rust 代码。
 #[component]
 pub fn App() -> impl IntoView {
     // 提供元信息上下文，让下面的 <Title>/<Stylesheet> 能正常工作（把内容收集到 <head>）。
     provide_meta_context();
 
-    // 【Rust 核心语法深度讲解：关联上下文与 view! 宏的 HTML 解析】
     // provide_meta_context() 是一个标准的函数调用。Leptos 在后台维护了一个全局的
     // "上下文（Context）"池。这个函数的作用是在整个应用的根部放置一块特殊的存储区，
     // 用来收集子组件里扔出来的 <Title> 和 <Stylesheet> 等元信息。
     // 这样当你在任意子组件里写 <Title text="xxx"/> 时，Leptos 知道该把这个标题
     // 放到 <head> 的哪个位置，而不是随便丢在 <body> 里。
-    //
-    // 你可能会好奇：Rust 怎么不报错说 <Stylesheet id="leptos" href="/pkg/leptos_btc.css"/>
-    // 这行代码语法不合法？因为它们被包裹在 view! { ... } 内部。
-    // view! 宏作为一个"语法捕获器"，在 Rust 编译器正式检查语法之前，
-    // 就已经把这一段"不合法"的 HTML 解析并重写成合法的 Rust 代码了
-    // （类似于把 <Stylesheet/> 翻译成了 Stylesheet(StylesheetProps { ... }) 的结构体初始化）。
-    // 这就是为什么你可以在 Rust 代码里直接写 HTML 标签——宏在编译期偷偷做了转换。
-
     view! {
         // 往 <head> 注入一个样式表链接。id="leptos" 让 cargo-leptos 能热重载这份 CSS。
         <Stylesheet id="leptos" href="/pkg/leptos_btc.css"/>

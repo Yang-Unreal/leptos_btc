@@ -60,6 +60,12 @@
     "Dokploy",
     "TIMESTAMPTZ",
     "turbofish",
+    "bindgen",
+    "dotenvy",
+    "dotenv",
+    "codegen",
+    "browserlist",
+
   ],
   "workbench.colorCustomizations": {
     "editorBracketHighlight.foreground1": "#ffd700",
