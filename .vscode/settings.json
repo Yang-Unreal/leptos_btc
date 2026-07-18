@@ -65,6 +65,8 @@
     "dotenv",
     "codegen",
     "browserlist",
+    "println",
+    
 
   ],
   "workbench.colorCustomizations": {

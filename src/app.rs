@@ -4,21 +4,11 @@
 // 这个文件定义“页面长什么样”和“点了按钮之后怎么反应”。它同时用于两端：
 //   - 服务器端：SSR 时被执行一遍，生成首屏 HTML 字符串。
 //   - 浏览器端：hydrate 时再执行一遍，把交互逻辑接到 HTML 上。
-//
-// 需要先建立的两个 Leptos 核心概念：
-//   1) 组件(component)：用 #[component] 标注的函数，返回 `impl IntoView`（可渲染的视图）。
-//      在 view! 里用 <大写名字/> 的形式像 HTML 标签一样使用它。
-//   2) 响应式(reactive)：signal（信号）是“会变化的值”。当信号变化时，用到它的那部分
-//      UI 会自动重新渲染。这就是 Leptos 不用手动操作 DOM 的原因——你改数据，界面自动跟着变。
-// ============================================================================
 
-// 【Rust 基础语法讲解：use 声明】
-// use 语句把其他模块/库里的类型、函数、trait 等引入当前作用域，这样不用每次都写全名。
-// 例如 leptos::html::Input 引入了 Input 类型，后面直接写 Input 即可。
+use crate::todo::*;
 use leptos::html::Input; // 代表 <input> 这个 HTML 元素类型，配合 NodeRef 直接读取输入框
-use leptos::prelude::*;   // Leptos 绝大多数常用项（signal、view!、Action、Resource 等）
-use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title}; // 管理 <head> 里的元信息
-use crate::todo::*;       // 引入 Todo 结构体和 5 个服务器函数（get_todos/add_todo/...）
+use leptos::prelude::*; // Leptos 绝大多数常用项（signal、view!、Action、Resource 等）
+use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title}; // 管理 <head> 里的元信息 // 引入 Todo 结构体和 5 个服务器函数（get_todos/add_todo/...）
 
 // shell：整个页面的最外层 HTML 骨架。它不是 #[component]，是个普通函数，
 // 在 main.rs 里被当作“页面外壳生成器”传给 leptos_routes_with_context。
@@ -79,40 +69,9 @@ pub fn App() -> impl IntoView {
 pub fn Todos() -> impl IntoView {
     // ---------- 状态定义区 ----------
 
-    // 【Rust 基础语法讲解：let 语句与模式绑定】
-    // let (refetch, set_refetch) = signal(0); 这行做了两件事：
-    //   1. signal(0) 调用函数，返回一个元组 (读取端, 写入端)
-    //   2. let (a, b) = ... 是模式匹配解构，把元组的两部分分别绑定到两个变量
-    //
-    // signal(0) 创建一个初值为 0 的信号，返回 (读取端 refetch, 写入端 set_refetch)。
-    // 【这个信号是干嘛的、为什么需要它】：它是一个“刷新触发器”。每次我们想强制重新从
-    //   服务器拉取最新列表时，就把它 +1。因为下面的 Resource 依赖它，值一变 Resource 就重跑。
     let (refetch, set_refetch) = signal(0);
-    // Resource：把“异步数据加载”接入响应式系统。
-    // 【两个参数的含义】：
-    //   第一个闭包 move || refetch.get() 是“依赖来源”：读取了 refetch，于是 refetch 一变，
-    //     Resource 就会重新执行第二个闭包。
-    //   第二个闭包 |_| get_todos() 是“怎么加载数据”：调用服务器函数拉取待办列表。
-    // 【为什么用 Resource 而不是直接调 get_todos】：Resource 会自动处理“加载中/成功/失败”
-    //   三种状态，并且在 SSR 期间就把数据取好、随首屏一起发给浏览器（首屏直出数据，见前面讨论）。
-    let todos = Resource::new(move || refetch.get(), |_| get_todos());
 
-    // 本地镜像：把列表在客户端另存一份，用于“乐观更新(optimistic update)”。
-    // RwSignal 是“可读可写合一”的信号。类型是 Option<Vec<Todo>>：None 表示“还没有数据”。
-    // None::<Vec<Todo>> 里的 ::<Vec<Todo>> 是“显式指定泛型类型”，帮编译器确定这个 None 的类型。
-    //   【Rust 基础语法讲解： turbofish 运算符 ::<T>】
-    //   有时候编译器无法推断出泛型类型的具体值，就需要我们用 ::<T> 显式告诉编译器。
-    //   这里 None 可以是任何类型的空值，加上 ::<Vec<Todo>> 就指定了"这是 Vec<Todo> 类型的 None"。
-    //   【Rust 基础语法讲解：Option<T> 枚举】
-    //   Option 是 Rust 标准库里的枚举，只有两个值：
-    //     Some(T) - 有值，里面装着 T
-    //     None    - 没有值（空）
-    //   它替代了其他语言里的 null/nil，强迫你显式处理"没有值"的情况，避免空指针异常。
-    //   例如：Option<Vec<Todo>> 表示"可能有一列 Vec<Todo>，也可能没有"。
-    //
-    // 【为什么要维护一份本地镜像】：如果每次点击都等服务器往返再刷新，UI 会有明显延迟。
-    //   乐观更新的思路是：点击后【立刻】改本地镜像让界面秒变，同时后台悄悄发请求给服务器；
-    //   只有当请求失败时才回滚（重新从服务器取）。这让应用手感很“跟手”。
+    let todos = Resource::new(move || refetch.get(), |_| get_todos());
     let todos_local = RwSignal::new(None::<Vec<Todo>>);
     // Effect：一个“副作用”，当它内部读取的信号变化时自动重新运行。
     // 【这个 Effect 的作用】：当 Resource（todos）成功拿到服务器数据时，把它同步进本地镜像。
@@ -223,9 +182,9 @@ pub fn Todos() -> impl IntoView {
         // let (id, title) = args; 从元组中提取值：
         //   - id 得到 i32（因为 i32 是 Copy，这里复制了值）
         //   - title 得到 String（因为 String 不是 Copy，这里转移了所有权）
-        let (id, title) = args;      // 解构元组
-        let id = *id;                // 复制 id（i32 是 Copy 类型）
-        let title = title.clone();   // 复制标题（String 需要 clone 才能复制）
+        let (id, title) = args; // 解构元组
+        let id = *id; // 复制 id（i32 是 Copy 类型）
+        let title = title.clone(); // 复制标题（String 需要 clone 才能复制）
         async move {
             if update_todo(id, title).await.is_err() {
                 set_refetch.update(|n| *n += 1);
