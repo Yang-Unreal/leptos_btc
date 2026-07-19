@@ -5,15 +5,11 @@
 //   - 服务器端：SSR 时被执行一遍，生成首屏 HTML 字符串。
 //   - 浏览器端：hydrate 时再执行一遍，把交互逻辑接到 HTML 上。
 
-use crate::todo::*;
+use crate::todo::*; // 引入 Todo 结构体和 5 个服务器函数（get_todos/add_todo/...）
 use leptos::html::Input; // 代表 <input> 这个 HTML 元素类型，配合 NodeRef 直接读取输入框
 use leptos::prelude::*; // Leptos 绝大多数常用项（signal、view!、Action、Resource 等）
-use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title}; // 管理 <head> 里的元信息 // 引入 Todo 结构体和 5 个服务器函数（get_todos/add_todo/...）
+use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title}; // 管理 <head> 里的元信息
 
-// shell：整个页面的最外层 HTML 骨架。它不是 #[component]，是个普通函数，
-// 在 main.rs 里被当作“页面外壳生成器”传给 leptos_routes_with_context。
-// 【为什么需要一个单独的 shell】：SSR 需要一个完整的 <html>…</html> 文档，而不仅是 body 里的
-//   内容。shell 负责 <head>（字符集、视口、注水脚本、meta）和把 <App/> 放进 <body>。
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -41,14 +37,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 
 #[component]
 pub fn App() -> impl IntoView {
-    // 提供元信息上下文，让下面的 <Title>/<Stylesheet> 能正常工作（把内容收集到 <head>）。
     provide_meta_context();
-
-    // provide_meta_context() 是一个标准的函数调用。Leptos 在后台维护了一个全局的
-    // "上下文（Context）"池。这个函数的作用是在整个应用的根部放置一块特殊的存储区，
-    // 用来收集子组件里扔出来的 <Title> 和 <Stylesheet> 等元信息。
-    // 这样当你在任意子组件里写 <Title text="xxx"/> 时，Leptos 知道该把这个标题
-    // 放到 <head> 的哪个位置，而不是随便丢在 <body> 里。
     view! {
         // 往 <head> 注入一个样式表链接。id="leptos" 让 cargo-leptos 能热重载这份 CSS。
         <Stylesheet id="leptos" href="/pkg/leptos_btc.css"/>
@@ -73,33 +62,11 @@ pub fn Todos() -> impl IntoView {
 
     let todos = Resource::new(move || refetch.get(), |_| get_todos());
     let todos_local = RwSignal::new(None::<Vec<Todo>>);
-    // Effect：一个“副作用”，当它内部读取的信号变化时自动重新运行。
-    // 【这个 Effect 的作用】：当 Resource（todos）成功拿到服务器数据时，把它同步进本地镜像。
-    //   于是“服务器是数据源头(source of truth)”，而本地镜像是可被乐观修改的工作副本。
     Effect::new(move |_| {
-        // todos.get() 返回 Option<Result<Vec<Todo>, _>>。
-        // 【Rust 基础语法讲解：if let 模式匹配】
-        // if let Some(Ok(list)) = todos.get() 这行做了三层模式匹配：
-        //   1. todos.get() 返回 Option<...>
-        //   2. 用 Some(...) 匹配，提取里面的值（如果是 None 就跳过整个 if）
-        //   3. 用 Ok(list) 匹配，提取成功结果（如果是 Err 就跳过）
-        // 这等价于：
-        //   match todos.get() {
-        //       Some(Ok(list)) => { ... }
-        //       _ => {}  // None 或 Err 都不处理
-        //   }
-        // if let 是 match 的简写，只关心"成功"的情况，其他情况忽略。
         if let Some(Ok(list)) = todos.get() {
             todos_local.set(Some(list)); // 用服务器数据覆盖本地镜像
         }
     });
-
-    // NodeRef：一个指向具体 DOM 元素的“引用”。这里指向新增待办的输入框。
-    // 【为什么需要它】：提交表单时我们要读取输入框当前的文字、并在成功后清空它，
-    //   NodeRef 让我们能直接拿到那个 <input> 元素来做这些操作。
-    // 【Rust 基础语法讲解：泛型参数 <Input>】
-    // NodeRef::<Input>::new() 中的 <Input> 是告诉 NodeRef 这个引用指向 <input> 元素。
-    // 不同 HTML 元素有不同的类型（Input、Div、Button 等），这样可以在编译期保证类型安全。
     let title_ref = NodeRef::<Input>::new();
 
     // Action：封装“一次异步操作”（通常是一次数据修改）。dispatch 时执行，内部可 .await。
