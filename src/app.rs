@@ -69,12 +69,6 @@ pub fn Todos() -> impl IntoView {
     });
     let title_ref = NodeRef::<Input>::new();
 
-    // Action：封装“一次异步操作”（通常是一次数据修改）。dispatch 时执行，内部可 .await。
-    // 【为什么用 Action 而不是自己 spawn 异步】：Action 帮你管理“进行中/完成/出错”状态，
-    //   与响应式系统集成得很好，是 Leptos 里触发“写操作(增删改)”的推荐方式。
-    // 【Rust 基础语法讲解：闭包作为参数】
-    // Action::new(闭包) - 闭包的签名描述了 Action 的参数类型。
-    // move |title: &String| 意思是：接收一个对 String 的引用，move 表示捕获外部变量时转移所有权。
     let add = Action::new(move |title: &String| {
         // 闭包参数是 &String（借用），先 clone 一份拿到所有权，好移进下面的 async 块。
         // 【Rust 基础语法讲解：clone() 方法】
