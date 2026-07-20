@@ -70,15 +70,7 @@ pub fn Todos() -> impl IntoView {
     let title_ref = NodeRef::<Input>::new();
 
     let add = Action::new(move |title: &String| {
-        // 闭包参数是 &String（借用），先 clone 一份拿到所有权，好移进下面的 async 块。
-        // 【Rust 基础语法讲解：clone() 方法】
-        // clone() 创建值的深拷贝。这里从 &String（借用）复制成 String（拥有所有权）。
-        // 为什么需要：async move 块需要拥有它的数据，不能只是借用。
         let title = title.clone();
-        // 【Rust 基础语法讲解：async move 块】
-        // async move { ... } 是一个异步块，返回一个 Future。
-        // move 关键字表示块内用到的外部变量（这里是 title）会被移动进块内，块拥有这些数据。
-        // 这个 Future 可能会在闭包返回后才执行，所以必须拥有自己的数据。
         async move {
             // 调用服务器函数新增（浏览器里 → 发 HTTP 请求）。? 表示失败就中断并返回错误。
             add_todo(title).await?;
