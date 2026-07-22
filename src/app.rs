@@ -6,11 +6,11 @@
 //   - 浏览器端：hydrate 时再执行一遍，把交互逻辑接到 HTML 上。
 
 use crate::todo::*;
+use chrono::Utc;
 use leptos::html::Input;
 use leptos::prelude::*;
-use uuid::Uuid;
-use chrono::Utc;
-use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title}; // 管理 <head> 里的元信息
+use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
+use uuid::Uuid; // 管理 <head> 里的元信息
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -19,18 +19,13 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
             <head>
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-                // AutoReload：开发模式下代码改动后自动刷新浏览器（cargo leptos watch 用）。
-                // options.clone()：这些组件都需要一份配置，clone 是因为要分别交给多个组件。
                 <AutoReload options=options.clone() />
-                // HydrationScripts：注入加载 WASM 和启动 hydrate() 的 <script>。
-                // 【为什么至关重要】：没有它，浏览器就不会去下载/运行前端 WASM，页面永远是
-                //   “死的”静态 HTML，点按钮没反应。它是把 lib.rs 的 hydrate() 接起来的关键。
                 <HydrationScripts options/>
-                // MetaTags：占位符，Title/Stylesheet 等组件设置的 <head> 内容最终注入这里。
+                <link rel="icon" href="/icon.svg" media="(prefers-color-scheme: light)" />
+                <link rel="icon" href="/icon-dark.svg" media="(prefers-color-scheme: dark)" />
                 <MetaTags/>
             </head>
             <body>
-                // 把根组件 App 放进 body。真正的界面从这里开始。
                 <App/>
             </body>
         </html>
@@ -45,7 +40,7 @@ pub fn App() -> impl IntoView {
         <Stylesheet id="leptos" href="/pkg/leptos_btc.css"/>
 
         // 设置浏览器标签页标题。
-        <Title text="Leptos + Postgres CRUD"/>
+        <Title text="Todos"/>
 
         // 真正的应用界面：一个 <main> 里放我们的 Todos 组件。
         <main>
