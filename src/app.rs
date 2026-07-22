@@ -219,15 +219,14 @@ pub fn Todos() -> impl IntoView {
                                                 // 两个分支必须返回相同类型（都用 .into_any() 擦除成 AnyView）。
                                                 {if is_editing {
                                                     // —— 编辑态：文本框 + 保存 + 取消 ——
-                                                    view! {
-                                                         <input
-                                                             node_ref=edit_ref
-                                                             type="text"
-                                                              class="flex-1 min-w-0 px-4 py-3 text-base sm:text-lg bg-slate-50 border border-indigo-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/15 transition-all duration-200 animate-slide-in"
-                                                             // prop:value 设置输入框的初始内容为当前标题。
-                                                             prop:value=todo.title
-                                                         />
-                                                         <button
+                                                     view! {
+                                                              <input
+                                                                  node_ref=edit_ref
+                                                                  type="text"
+                                                                  class="flex-1 min-w-0 px-4 py-3 text-base sm:text-lg bg-slate-50 border border-indigo-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/15 animate-slide-in"
+                                                                  prop:value=todo.title
+                                                              />
+                                                              <button
                                                               class="px-4 py-3 text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 rounded-lg shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:opacity-90 transition-all duration-200"
                                                              on:click=move |_| {
                                                                  // 读取编辑框里的新文字。
@@ -265,8 +264,8 @@ pub fn Todos() -> impl IntoView {
                                                              class="px-3 py-2 text-sm font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg hover:bg-slate-200 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
                                                              // 取消：仅退出编辑态，不改数据。
                                                              on:click=move |_| set_editing.set(None)
-                                                        >"Cancel"</button>
-                                                    }.into_any()
+                                                         >"Cancel"</button>
+                                                     }.into_any()
                                                     // 【为什么末尾要 .into_any()】：if 的两个分支返回的
                                                     //   view 具体类型不同，Rust 要求 if/else 两支类型一致。
                                                     //   into_any() 把它们“擦除”成同一个统一类型(AnyView)，
