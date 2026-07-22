@@ -138,10 +138,10 @@ async fn main() {
     // 这里为了简单直接内联建表。
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS todos (
-            id          SERIAL PRIMARY KEY,                       -- 自增主键，唯一标识每条待办
-            title       TEXT NOT NULL,                            -- 标题，NOT NULL 表示必填
-            completed   BOOLEAN NOT NULL DEFAULT FALSE,           -- 是否完成，默认未完成
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()        -- 创建时间，默认当前时刻
+            id          UUID PRIMARY KEY,
+            title       TEXT NOT NULL,
+            completed   BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )",
     )
     .execute(&pool) // 借用连接池来执行；从池里临时借一条连接跑这条 SQL

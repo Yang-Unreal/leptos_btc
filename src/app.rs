@@ -5,9 +5,11 @@
 //   - 服务器端：SSR 时被执行一遍，生成首屏 HTML 字符串。
 //   - 浏览器端：hydrate 时再执行一遍，把交互逻辑接到 HTML 上。
 
-use crate::todo::*; // 引入 Todo 结构体和 5 个服务器函数（get_todos/add_todo/...）
-use leptos::html::Input; // 代表 <input> 这个 HTML 元素类型，配合 NodeRef 直接读取输入框
-use leptos::prelude::*; // Leptos 绝大多数常用项（signal、view!、Action、Resource 等）
+use crate::todo::*;
+use leptos::html::Input;
+use leptos::prelude::*;
+use uuid::Uuid;
+use chrono::Utc;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title}; // 管理 <head> 里的元信息
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -72,29 +74,44 @@ pub fn Todos() -> impl IntoView {
     let add = Action::new(move |title: &String| {
         let title = title.clone();
         async move {
-            // 调用服务器函数新增（浏览器里 → 发 HTTP 请求）。? 表示失败就中断并返回错误。
-            add_todo(title).await?;
-            // 成功后把刷新触发器 +1 → Resource 重新拉取 → Effect 再把最新数据写回本地镜像。
-            // 【为什么新增走“服务器为准”而不是乐观更新】：新增的记录 id、created_at 是数据库
-            //   生成的，本地无法预知，所以新增后干脆重新拉一遍拿到权威数据最稳妥。
-            set_refetch.update(|n| *n += 1);
-            // 显式标注这个 async 块的返回类型为 Result<(), ServerFnError>。
-            // 【Rust 基础语法讲解： turbofish 运算符在类型标注中的使用】
-            // Ok::<(), ServerFnError>(()) 中的 ::<(), ServerFnError> 告诉编译器：
-            //   - 这个 Ok 包装的类型是 ()（空元组，表示没有返回值）
-            //   - Result 的错误类型是 ServerFnError
-            // 【为什么要写这一句】：帮助编译器确定 ? 运算符要处理的错误类型。
-            //   ? 运算符需要知道错误类型是什么才能正确传播。如果不标注，编译器可能无法推断。
+            let new_id = Uuid::now_v7();
+
+            todos_local.update(|opt| {
+                if let Some(list) = opt {
+                    let mut new_list = list.clone();
+                    new_list.insert(
+                        0,
+                        Todo {
+                            id: new_id,
+                            title: title.clone(),
+                            completed: false,
+                            created_at: Utc::now(),
+                        },
+                    );
+                    *opt = Some(new_list);
+                }
+            });
+
+            match add_todo(new_id, title).await {
+                Ok(_) => {}
+                Err(_) => {
+                    todos_local.update(|opt| {
+                        if let Some(list) = opt {
+                            list.retain(|t| t.id != new_id);
+                        }
+                    });
+                    set_refetch.update(|n| *n += 1);
+                }
+            }
+
             Ok::<(), ServerFnError>(())
         }
     });
 
     // 切换完成状态的 Action。
-    let toggle = Action::new(move |id: &i32| {
-        let id = *id; // i32 实现了 Copy，用 * 解引用直接复制出值
+    let toggle = Action::new(move |id: &Uuid| {
+        let id = *id; // Uuid 实现了 Copy，用 * 解引用直接复制出值
         async move {
-            // 注意：本地的乐观更新已经在“点击处理函数”里先做了（见下方 checkbox 的 on:click）。
-            // 这里只负责发请求；只有当请求【失败】时，才重新从服务器同步，以回滚错误的乐观改动。
             if toggle_todo(id).await.is_err() {
                 set_refetch.update(|n| *n += 1);
             }
@@ -103,7 +120,7 @@ pub fn Todos() -> impl IntoView {
     });
 
     // 删除的 Action，套路同上：乐观删除在点击时已做，失败才回滚。
-    let delete = Action::new(move |id: &i32| {
+    let delete = Action::new(move |id: &Uuid| {
         let id = *id;
         async move {
             if delete_todo(id).await.is_err() {
@@ -114,19 +131,12 @@ pub fn Todos() -> impl IntoView {
     });
 
     // 记录“当前正在编辑哪一条”。None 表示没有任何条目处于编辑态。
-    // 【为什么需要它】：每条待办可以切换到“编辑输入框”状态，用这个信号统一控制谁在编辑。
-    // 【Rust 基础语法讲解：Option::<T>::None】
-    // signal(Option::<i32>::None) 创建一个初值为 None 的信号，类型是 Option<i32>。
-    // 当 Some(id) 时表示正在编辑 id 对应的待办。
-    let (editing, set_editing) = signal(Option::<i32>::None);
+    let (editing, set_editing) = signal(Option::<Uuid>::None);
 
     // 修改标题的 Action。参数是 (id, 新标题) 的元组。
-    // 【Rust 基础语法讲解：元组（Tuple）】
-    // 元组是把多个不同类型值组合在一起的方式，写法是 (T1, T2, T3)。
-    // 这里 Action 的参数是 &(i32, String)，即"一个包含 i32 和 String 的元组的引用"。
-    let update = Action::new(move |args: &(i32, String)| {
+    let update = Action::new(move |args: &(Uuid, String)| {
         let (id, title) = args; // 解构元组
-        let id = *id; // 复制 id（i32 是 Copy 类型）
+        let id = *id; // 复制 id（Uuid 是 Copy 类型）
         let title = title.clone(); // 复制标题（String 需要 clone 才能复制）
         async move {
             if update_todo(id, title).await.is_err() {
