@@ -223,7 +223,7 @@ pub fn Todos() -> impl IntoView {
                                                          <input
                                                              node_ref=edit_ref
                                                              type="text"
-                                                              class="flex-1 min-w-0 px-4 py-3 text-base sm:text-lg bg-slate-50 border border-indigo-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/15 transition-all duration-200 animate-slide-in"
+                                                              class="flex-1 min-w-0 px-4 py-3 text-base sm:text-lg bg-slate-50 border border-indigo-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/15 transition-all duration-200"
                                                              // prop:value 设置输入框的初始内容为当前标题。
                                                              prop:value=todo.title
                                                          />
