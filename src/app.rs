@@ -233,7 +233,7 @@ pub fn Todos() -> impl IntoView {
                                                              prop:value=todo.title
                                                          />
                                                          <button
-                                                              class="px-4 py-3 text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 rounded-lg shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:opacity-90 transition-all duration-200"
+                                                              class="px-4 py-3 text-sm font-semibold text-white bg-linear-to-r from-indigo-500 to-violet-500 rounded-lg shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:opacity-90 transition-all duration-200"
                                                              on:click=move |_| {
                                                                  // 读取编辑框里的新文字。
                                                                  let value = edit_ref
