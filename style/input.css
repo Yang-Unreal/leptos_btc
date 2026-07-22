@@ -176,6 +176,15 @@ h2 {
    Animations (动画)
    ============================================================================ */
 
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
 }
 
 
