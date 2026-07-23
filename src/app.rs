@@ -59,11 +59,13 @@ pub fn Todos() -> impl IntoView {
 
     let todos = Resource::new(move || refetch.get(), |_| get_todos());
     let todos_local = RwSignal::new(None::<Vec<Todo>>);
+
     Effect::new(move |_| {
         if let Some(Ok(list)) = todos.get() {
             todos_local.set(Some(list)); // 用服务器数据覆盖本地镜像
         }
     });
+
     let title_ref = NodeRef::<Input>::new();
 
     let add = Action::new(move |title: &String| {
@@ -103,9 +105,8 @@ pub fn Todos() -> impl IntoView {
         }
     });
 
-    // 切换完成状态的 Action。
     let toggle = Action::new(move |id: &Uuid| {
-        let id = *id; // Uuid 实现了 Copy，用 * 解引用直接复制出值
+        let id = *id;
         async move {
             if toggle_todo(id).await.is_err() {
                 set_refetch.update(|n| *n += 1);
@@ -114,7 +115,6 @@ pub fn Todos() -> impl IntoView {
         }
     });
 
-    // 删除的 Action，套路同上：乐观删除在点击时已做，失败才回滚。
     let delete = Action::new(move |id: &Uuid| {
         let id = *id;
         async move {
@@ -125,14 +125,12 @@ pub fn Todos() -> impl IntoView {
         }
     });
 
-    // 记录“当前正在编辑哪一条”。None 表示没有任何条目处于编辑态。
     let (editing, set_editing) = signal(Option::<Uuid>::None);
 
-    // 修改标题的 Action。参数是 (id, 新标题) 的元组。
     let update = Action::new(move |args: &(Uuid, String)| {
-        let (id, title) = args; // 解构元组
-        let id = *id; // 复制 id（Uuid 是 Copy 类型）
-        let title = title.clone(); // 复制标题（String 需要 clone 才能复制）
+        let (id, title) = args;
+        let id = *id;
+        let title = title.clone();
         async move {
             if update_todo(id, title).await.is_err() {
                 set_refetch.update(|n| *n += 1);
@@ -146,27 +144,19 @@ pub fn Todos() -> impl IntoView {
         <section class="w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl xl:max-w-3xl mx-auto bg-white/95 backdrop-blur-sm rounded-2xl sm:rounded-3xl p-8 sm:p-10 md:p-12 shadow-lg sm:shadow-xl border border-white/60">
             <h2 class="text-lg sm:text-xl md:text-2xl font-bold tracking-tight text-slate-800 text-center mb-4 sm:mb-6">"Todos"</h2>
 
-            // 新增表单。
             <form
                 class="flex flex-col sm:flex-row gap-4 mb-8 sm:mb-10"
-                // on:submit=... 绑定表单提交事件。ev 是事件对象。
                 on:submit=move |ev| {
-                    // 阻止浏览器默认的“提交表单会刷新页面”行为——我们要用 JS/WASM 处理。
                     ev.prevent_default();
-                    // 读取输入框当前值：title_ref.get() 拿到 <input> 元素（Option），
-                    // .map(|el| el.value()) 取它的文字，取不到就用空字符串兜底。
                     let value = title_ref.get().map(|el| el.value()).unwrap_or_default();
-                    // 非空才提交（trim 去空白后判断）。
                     if !value.trim().is_empty() {
-                        add.dispatch(value); // 触发上面的 add Action → 调 add_todo
-                        // 提交后清空输入框，方便继续输入下一条。
+                        add.dispatch(value);
                         if let Some(input) = title_ref.get() {
                             input.set_value("");
                         }
                     }
                 }
             >
-                // node_ref=title_ref：把这个 <input> 和上面的 NodeRef 关联起来。
                 <input
                     node_ref=title_ref
                     type="text"
@@ -179,177 +169,144 @@ pub fn Todos() -> impl IntoView {
                 >"Add"</button>
             </form>
 
-            // Transition：在异步数据加载时显示 fallback，加载完成后显示真实内容；
-            // 且在“重新加载”时不会闪回 fallback（比 Suspense 更平滑）。
-            // 【为什么用它】：Resource 的数据是异步来的，首次加载时用它显示“Loading…”，
-            //   体验更好。
             <Transition fallback=move || view! { <p>"Loading todos…"</p> }>
-                // 这个 move || 闭包是响应式的：它读取的信号一变，这块 UI 就自动重渲染。
-                // 【Rust 基础语法讲解：match 表达式与模式匹配】
-                // match (todos.get(), todos_local.get()) 同时看两个来源：
-                //   todos（服务器 Resource）和 todos_local（本地镜像）。
-                // match 会逐一检查每个分支，找到第一个匹配的并执行。
-                // Rust 的 match 是“穷尽的（exhaustive）”：必须覆盖所有可能的情况，否则编译不过。
-                {move || match (todos.get(), todos_local.get()) {
-                    // 情况一：本地镜像有数据（也覆盖了“乐观修改之后”的状态）→ 用它渲染列表。
-                    // (_, Some(list)) 里第一个 _ 表示“不关心 Resource 当前是什么状态”。
-                    // 【Rust 基础语法讲解：通配符 _】
-                    // _ 是模式匹配中的通配符，表示"匹配任意值但不关心具体是什么"。
-                    // 这里我们只关心本地镜像是否有数据，不关心服务器 Resource 的状态。
-                    (_, Some(list)) => view! {
-                        <div>
-                             <ul class="list-none m-0 p-0 flex flex-col gap-3 sm:gap-4">
-                                // 把 Vec<Todo> 转成一串 <li>。
-                                // 【Rust 基础语法讲解：迭代器（Iterator）】
-                                // list.into_iter() 把 Vec 变成迭代器，可以逐个消费其中的元素。
-                                // into_iter() 会"消耗"list（所有权转移），每个元素取出后原 Vec 不再可用。
-                                // 对比 iter()（借用，不消耗）和 iter_mut()（可变借用，可修改元素）。
-                                {list
-                                    .into_iter()
-                                    .map(|todo| {
-                                        // 为每一条待办生成一个 <li>。
-                                        let id = todo.id;
-                                        // 每条编辑输入框各自的 NodeRef。
-                                        let edit_ref = NodeRef::<Input>::new();
-                                        // 当前这条是否处于编辑态。
-                                        let is_editing = editing.get() == Some(id);
-                                        view! {
-                                            // class:completed=... 是条件类名：completed 为真时
-                                            // 给 <li> 加上 completed 样式类（通常用于加删除线）。
-                                             <li class:completed=todo.completed class="flex items-center gap-3 sm:gap-4 p-4 sm:p-5 border border-slate-200 rounded-xl bg-white transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm active:scale-[0.998] active:bg-slate-100">
-                                                // 根据是否在编辑，显示两套不同的界面。
-                                                // 【Rust 基础语法讲解：if 表达式】
-                                                // Rust 里 if 是表达式，不是语句。它会返回一个值。
-                                                // 这里 if is_editing { ... } else { ... } 整体返回一个 view。
-                                                // 两个分支必须返回相同类型（都用 .into_any() 擦除成 AnyView）。
-                                                {if is_editing {
-                                                    // —— 编辑态：文本框 + 保存 + 取消 ——
-                                                    view! {
-                                                         <input
-                                                             node_ref=edit_ref
-                                                             type="text"
-                                                              class="flex-1 min-w-0 px-4 py-3 text-base sm:text-lg bg-slate-50 border border-indigo-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/15 transition-all duration-200"
-                                                             // prop:value 设置输入框的初始内容为当前标题。
-                                                             prop:value=todo.title
-                                                         />
-                                                         <button
-                                                              class="px-4 py-3 text-sm font-semibold text-white bg-linear-to-r from-indigo-500 to-violet-500 rounded-lg shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:opacity-90 transition-all duration-200"
-                                                             on:click=move |_| {
-                                                                 // 读取编辑框里的新文字。
-                                                                 let value = edit_ref
-                                                                     .get()
-                                                                     .map(|el| el.value())
-                                                                     .unwrap_or_default();
-                                                                 // 乐观更新：立刻改本地镜像里对应那条的标题。
-                                                                 // 【Rust 基础语法讲解：闭包参数 |_|】
-                                                                 // |_| 表示"忽略这个参数"。on:click 会传入事件对象，
-                                                                 // 但我们不需要它，所以用 _ 表示忽略。
-                                                                 todos_local.update(|opt| {
-                                                                     if let Some(list) = opt {
-                                                                         // iter_mut 拿到可修改的引用，
-                                                                         // find 找到 id 匹配的那条。
-                                                                         // 【Rust 基础语法讲解：方法链】
-                                                                         // list.iter_mut() 返回可变迭代器
-                                                                         //   .find(|t| t.id == id) 查找满足条件的元素
-                                                                         //   整个链式调用返回 Option<&mut Todo>
-                                                                         if let Some(t) = list
-                                                                             .iter_mut()
-                                                                             .find(|t| t.id == id)
-                                                                         {
-                                                                             t.title = value.clone();
-                                                                         }
-                                                                     }
-                                                                 });
-                                                                 // 退出编辑态。
-                                                                 set_editing.set(None);
-                                                                 // 再把改动发给服务器（失败会在 update Action 里回滚)。
-                                                                 update.dispatch((id, value));
-                                                             }
-                                                         >"Save"</button>
-                                                         <button
-                                                             class="px-3 py-2 text-sm font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg hover:bg-slate-200 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
-                                                             // 取消：仅退出编辑态，不改数据。
-                                                             on:click=move |_| set_editing.set(None)
-                                                        >"Cancel"</button>
-                                                    }.into_any()
-                                                    // 【为什么末尾要 .into_any()】：if 的两个分支返回的
-                                                    //   view 具体类型不同，Rust 要求 if/else 两支类型一致。
-                                                    //   into_any() 把它们“擦除”成同一个统一类型(AnyView)，
-                                                    //   这样两支才能匹配、通过编译。
-                                                    // 【Rust 基础语法讲解：类型擦除】
-                                                    // Rust 是静态类型语言，通常要求编译期知道确切类型。
-                                                    // 当我们需要"不同类型但行为相同"时，可以用 trait object
-                                                    // （如 AnyView）进行"类型擦除"，让编译器把它们当作同一类型。
-                                                } else {
-                                                    // —— 展示态：勾选框 + 标题 + 编辑 + 删除 ——
-                                                    view! {
-                                                        <input
-                                                            type="checkbox"
-                                                            class="w-4 h-4 sm:w-5 sm:h-5 accent-indigo-500 cursor-pointer flex-none transition-transform duration-150 hover:scale-110"
-                                                            // prop:checked 反映当前完成状态。
-                                                            prop:checked=todo.completed
-                                                            on:click=move |_| {
-                                                                // 乐观更新：立刻在本地把 completed 取反。
-                                                                todos_local.update(|opt| {
-                                                                    if let Some(list) = opt {
-                                                                        if let Some(t) = list
-                                                                            .iter_mut()
-                                                                            .find(|t| t.id == id)
-                                                                        {
-                                                                            t.completed = !t.completed;
-                                                                        }
-                                                                    }
-                                                                });
-                                                                // 再通知服务器（失败才回滚)。
-                                                                toggle.dispatch(id);
-                                                            }
-                                                        />
-                                                         <span class="flex-1 min-w-0 text-base sm:text-lg wrap-break-word leading-relaxed todo-title">{todo.title}</span>
-                                                        <button
-                                                            class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:scale-95 transition-all duration-200"
-                                                            // 进入编辑态：记录正在编辑的是这条 id。
-                                                            on:click=move |_| set_editing.set(Some(id))
-                                                        >"✎"</button>
-                                                        <button
-                                                            class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 active:scale-95 transition-all duration-200"
-                                                            on:click=move |_| {
-                                                                // 乐观删除：立刻从本地镜像移除这条。
-                                                                // retain 保留"不等于 id"的所有元素。
-                                                                // 【Rust 基础语法讲解：闭包在迭代器中的使用】
-                                                                // list.retain(|t| t.id != id) 遍历列表，
-                                                                // 闭包返回 true 保留元素，false 移除。
-                                                                // 这里保留 id 不等于当前 id 的元素，实现删除。
-                                                                todos_local.update(|opt| {
-                                                                    if let Some(list) = opt {
-                                                                        list.retain(|t| t.id != id);
-                                                                    }
-                                                                });
-                                                                // 再通知服务器删除（失败才回滚）。
-                                                                delete.dispatch(id);
-                                                            }
-                                                        >"✕"</button>
-                                                    }.into_any()
-                                                }}
-                                            </li>
-                                        }
-                                    })
-                                    .collect_view()} // 把一串 view 收集成可渲染的列表
-                            </ul>
-                        </div>
+
+                // 1. <Show> 替代最外层的 match 表达式
+                <Show
+                    when=move || todos_local.with(|opt| opt.is_some())
+                    // 如果本地没数据，用 fallback 处理服务端的报错或继续显示 Loading
+                    fallback=move || match todos.get() {
+                        Some(Err(e)) => view! {
+                            <div class="text-center text-sm text-red-500 my-4 p-3 bg-red-50 rounded-xl border border-red-200/60">
+                                {format!("Error: {}", e)}
+                            </div>
+                        }.into_view(),
+                        _ => view! {
+                            <div class="text-center text-slate-400 text-sm my-4 leading-relaxed">
+                                {String::from("Loading…")}
+                            </div>
+                        }.into_view(),
                     }
-                    .into_view()
-                    .into_any(),
-                    // 情况二：服务器返回错误，且本地没有任何缓存 → 显示错误信息。
-                    // (Some(Err(e)), None)：Resource 已返回但是 Err，且本地镜像还是 None。
-                    (Some(Err(e)), None) => {
-                        view! { <div class="text-center text-sm text-red-500 my-4 p-3 bg-red-50 rounded-xl border border-red-200/60">{format!("Error: {}", e)}</div> }
-                            .into_view()
-                            .into_any()
-                    }
-                    // 情况三：其它（仍在加载 / 正在协调）→ 显示 Loading。
-                    // `_` 是“兜底分支”，匹配前面没覆盖到的所有情况。match 必须覆盖所有可能。
-                    _ => view! { <div class="text-center text-slate-400 text-sm my-4 leading-relaxed">"Loading…"</div> }.into_view().into_any(),
-                }}
+                >
+                    <div>
+                        <ul class="list-none m-0 p-0 flex flex-col gap-3 sm:gap-4">
+
+                            // 2. <For> 替代 .into_iter().map().collect_view()
+                            // 它通过 key 缓存 DOM 节点，极大提高性能！
+                            <For
+                                each=move || todos_local.get().unwrap_or_default()
+                                key=|todo| todo.id
+                                children=move |todo| {
+                                    let id = todo.id;
+                                    let edit_ref = NodeRef::<Input>::new();
+
+                                    // 派生信号1：当前项是否在编辑
+                                    let is_editing = move || editing.get() == Some(id);
+
+                                    // 【非常重要】：派生信号2 & 3
+                                    // 因为 <For> 在 id 不变时【不会】重新执行此闭包（保留了DOM节点）。
+                                    // 所以为了让 completed 和 title 的改变能反映到 UI 上，
+                                    // 必须动态地去 todos_local 中查当前最新值。
+                                    let title = move || {
+                                        todos_local.with(|opt| {
+                                            opt.as_ref()
+                                                .and_then(|l| l.iter().find(|t| t.id == id).map(|t| t.title.clone()))
+                                                .unwrap_or_default()
+                                        })
+                                    };
+                                    let completed = move || {
+                                        todos_local.with(|opt| {
+                                            opt.as_ref()
+                                                .and_then(|l| l.iter().find(|t| t.id == id).map(|t| t.completed))
+                                                .unwrap_or_default()
+                                        })
+                                    };
+
+                                    view! {
+                                        // 这里绑定的是上面派生的 completed 闭包（响应式）
+                                        <li class:completed=completed class="flex items-center gap-3 sm:gap-4 p-4 sm:p-5 border border-slate-200 rounded-xl bg-white transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm active:scale-[0.998] active:bg-slate-100">
+
+                                            // 3. <Show> 替代内层的 if/else，彻底消灭 .into_any()
+                                            <Show
+                                                when=is_editing
+                                                // 【展示态】
+                                                fallback=move || view! {
+                                                    <input
+                                                        type="checkbox"
+                                                        class="w-4 h-4 sm:w-5 sm:h-5 accent-indigo-500 cursor-pointer flex-none transition-transform duration-150 hover:scale-110"
+                                                        // 同样绑定响应式的 completed
+                                                        prop:checked=completed
+                                                        on:click=move |_| {
+                                                            todos_local.update(|opt| {
+                                                                if let Some(list) = opt {
+                                                                    if let Some(t) = list.iter_mut().find(|t| t.id == id) {
+                                                                        t.completed = !t.completed;
+                                                                    }
+                                                                }
+                                                            });
+                                                            toggle.dispatch(id);
+                                                        }
+                                                    />
+                                                    // 绑定响应式的 title
+                                                    <span class="flex-1 min-w-0 text-base sm:text-lg wrap-break-word leading-relaxed todo-title">
+                                                        {title}
+                                                    </span>
+                                                    <button
+                                                        class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:scale-95 transition-all duration-200"
+                                                        on:click=move |_| set_editing.set(Some(id))
+                                                    >"✎"</button>
+                                                    <button
+                                                        class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 active:scale-95 transition-all duration-200"
+                                                        on:click=move |_| {
+                                                            todos_local.update(|opt| {
+                                                                if let Some(list) = opt {
+                                                                    list.retain(|t| t.id != id);
+                                                                }
+                                                            });
+                                                            delete.dispatch(id);
+                                                        }
+                                                    >"✕"</button>
+                                                }
+                                            >
+                                                // 【编辑态】
+                                                <input
+                                                    node_ref=edit_ref
+                                                    type="text"
+                                                    class="flex-1 min-w-0 px-4 py-3 text-base sm:text-lg bg-slate-50 border border-indigo-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/15 transition-all duration-200"
+                                                    // 编辑框的初始值
+                                                    prop:value=title
+                                                />
+                                                <button
+                                                    class="px-4 py-3 text-sm font-semibold text-white bg-linear-to-r from-indigo-500 to-violet-500 rounded-lg shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:opacity-90 transition-all duration-200"
+                                                    on:click=move |_| {
+                                                        let value = edit_ref
+                                                            .get()
+                                                            .map(|el| el.value())
+                                                            .unwrap_or_default();
+
+                                                        todos_local.update(|opt| {
+                                                            if let Some(list) = opt {
+                                                                if let Some(t) = list.iter_mut().find(|t| t.id == id) {
+                                                                    t.title = value.clone();
+                                                                }
+                                                            }
+                                                        });
+                                                        set_editing.set(None);
+                                                        update.dispatch((id, value));
+                                                    }
+                                                >"Save"</button>
+                                                <button
+                                                    class="px-3 py-2 text-sm font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg hover:bg-slate-200 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
+                                                    on:click=move |_| set_editing.set(None)
+                                                >"Cancel"</button>
+                                            </Show>
+                                        </li>
+                                    }
+                                }
+                            /> // <For> 结束
+                        </ul>
+                    </div>
+                </Show>
             </Transition>
         </section>
     }
