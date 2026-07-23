@@ -1261,6 +1261,7 @@ dependencies = [
  "leptos_axum",
  "leptos_meta",
  "leptos_router",
+ "reactive_stores",
  "serde",
  "sqlx",
  "tokio",
