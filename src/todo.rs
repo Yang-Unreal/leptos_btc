@@ -10,15 +10,26 @@
 
 use chrono::{DateTime, Utc};
 use leptos::prelude::*;
+use reactive_stores::Store;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Store)]
 pub struct Todo {
     pub id: Uuid,
     pub title: String,
     pub completed: bool,
     pub created_at: DateTime<Utc>,
+}
+
+/// Store 容器：包裹 Vec<Todo>，使 reactive_stores 能够对列表中每一项
+/// 的每个字段做细粒度响应式追踪。
+/// `#[store(key: ...)]` 让 Vec 按 Uuid 做 keyed 追踪，
+/// 删除/插入时只移动受影响的 DOM 节点，不会全量重渲染。
+#[derive(Debug, Clone, Store, Default)]
+pub struct TodoList {
+    #[store(key: Uuid = |todo| todo.id)]
+    pub todos: Vec<Todo>,
 }
 
 #[server]
