@@ -10,10 +10,14 @@
 
 use chrono::{DateTime, Utc};
 use leptos::prelude::*;
+use reactive_stores::Store;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+// derive(Store)：为 Todo 生成 TodoStoreFields trait，使每个字段（title/completed…）
+// 都成为独立的细粒度响应式节点 —— 修改某一条 todo 的某个字段，只会通知
+// 订阅了【那个字段】的 DOM 节点，其它行完全不动。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Store)]
 pub struct Todo {
     pub id: Uuid,
     pub title: String,
