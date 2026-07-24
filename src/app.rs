@@ -1,44 +1,33 @@
-// ============================================================================
-// app.rs —— reactive_stores 细粒度响应性 + keyed <For> + Suspend SSR 流式渲染
-// ----------------------------------------------------------------------------
-// 架构核心（三大目标的实现方式）：
-//
-// 1.【细粒度响应性 fine-grained reactivity】
-//    使用 reactive_stores::Store：状态树的每个字段（todo.title / todo.completed）
-//    都是独立的响应式节点。切换某一条 todo 的 completed，只会通知订阅了
-//    【那一个字段】的 DOM 节点（那个 checkbox / 那个 <li> 的 class），
-//    <For> 不会重新 diff，其它行的任何闭包都不会重跑，也没有任何 Vec/HashMap 克隆。
-//
-// 2.【O(1) 时间复杂度】
-//    #[store(key: Uuid = |todo| todo.id)] 让 Vec<Todo> 成为"keyed 字段"：
-//    每一行拿到的 Field<Todo> 通过 key 定位（内部维护 key→索引映射，O(1)），
-//    字段级读写（title.set / completed.update）都是 O(1) 定点操作，
-//    彻底替代了旧版 `todo_lookup.get()`（每次读取克隆整个 HashMap，O(n)）
-//    和 `iter_mut().find()`（O(n) 线性扫描）。
-//
-// 3.【SEO / SSR】
-//    <Transition> + Suspend::new(async ...) 直接 await Resource：
-//    服务器端会等数据查完、把【真实的 todo 列表 HTML】流式渲染进首屏，
-//    爬虫拿到的是完整内容（不再需要旧版 Show-fallback 渲染只读副本的 hack）。
-//    另外补齐 <Meta> description / Open Graph 标签和语义化 <h1>。
-// ============================================================================
-
 use crate::todo::*;
 use chrono::Utc;
-use leptos::html::Input;
 use leptos::prelude::*;
-use leptos_meta::{provide_meta_context, Meta, MetaTags, Stylesheet, Title};
-use reactive_stores::{Field, Store};
+use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
 use uuid::Uuid;
 
-// ---------------- 响应式状态树 ----------------
-// derive(Store) 生成 TodoStateStoreFields trait（提供 .todos() 字段访问器）。
-// #[store(key: ...)]：把 Vec<Todo> 变成"按 id 索引"的 keyed 集合，
-// 使 <For> 的每一行都能拿到一个稳定的、O(1) 定位的 Field<Todo>。
-#[derive(Clone, Debug, Default, Store)]
-struct TodoState {
-    #[store(key: Uuid = |todo| todo.id)]
-    todos: Vec<Todo>,
+// ============================================================================
+// 纯原生细粒度模型 (Vanilla Fine-grained Reactivity)
+// 抛弃第三方 Store，完全使用 Leptos 原生 RwSignal 构建状态树。
+// ============================================================================
+#[derive(Clone, Debug)]
+pub struct TodoRx {
+    pub id: Uuid,
+    pub title: RwSignal<String>,
+    pub completed: RwSignal<bool>,
+    // 核心重构：引入逻辑删除状态，实现严格 O(1) 的删除复杂度
+    pub deleted: RwSignal<bool>,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
+impl From<Todo> for TodoRx {
+    fn from(todo: Todo) -> Self {
+        Self {
+            id: todo.id,
+            title: RwSignal::new(todo.title),
+            completed: RwSignal::new(todo.completed),
+            deleted: RwSignal::new(false),
+            created_at: todo.created_at,
+        }
+    }
 }
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -52,6 +41,21 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <HydrationScripts options/>
                 <link rel="icon" href="/icon.svg" media="(prefers-color-scheme: light)" />
                 <link rel="icon" href="/icon-dark.svg" media="(prefers-color-scheme: dark)" />
+
+                // 【SEO优化：JSON-LD 结构化数据】
+                <script type="application/ld+json">
+                    {r#"
+                    {
+                      "@context": "https://schema.org",
+                      "@type": "WebApplication",
+                      "name": "Todos",
+                      "url": "https://todos.example.com",
+                      "applicationCategory": "ProductivityApplication",
+                      "operatingSystem": "All",
+                      "description": "A blazingly fast, server-side rendered todo list built with Leptos and Rust."
+                    }
+                    "#}
+                </script>
                 <MetaTags/>
             </head>
             <body>
@@ -64,64 +68,102 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 #[component]
 pub fn App() -> impl IntoView {
     provide_meta_context();
+    let site_url = "https://todos.example.com";
+
     view! {
         <Stylesheet id="leptos" href="/pkg/leptos_btc.css"/>
-        // ---- SEO 元信息：标题 + 描述 + Open Graph ----
+
+        // 【SEO优化：全套 Meta 标签与 Canonical URL】
         <Title text="Todos — Fast Full-Stack Todo App"/>
         <Meta name="description" content="A blazingly fast, server-side rendered todo list built with Leptos, Rust, Axum, and PostgreSQL."/>
+        <Meta name="theme-color" content="#4f46e5"/>
+        <Link rel="canonical" href=site_url/>
+
+        // Open Graph
+        <Meta property="og:type" content="website"/>
+        <Meta property="og:url" content=site_url/>
         <Meta property="og:title" content="Todos — Fast Full-Stack Todo App"/>
         <Meta property="og:description" content="A blazingly fast, server-side rendered todo list built with Leptos and Rust."/>
-        <Meta property="og:type" content="website"/>
-        <main>
-            <Todos/>
-        </main>
+        <Meta property="og:image" content=format!("{}/og-image.jpg", site_url)/>
+
+        // Twitter Cards
+        <Meta name="twitter:card" content="summary_large_image"/>
+        <Meta name="twitter:title" content="Todos — Fast Full-Stack Todo App"/>
+        <Meta name="twitter:description" content="A blazingly fast, server-side rendered todo list built with Leptos and Rust."/>
+        <Meta name="twitter:image" content=format!("{}/twitter-image.jpg", site_url)/>
+
+        // 【SEO优化：语义化 HTML 地标 (Landmarks)】
+        <div class="w-full h-screen bg-linear-to-b from-slate-50 via-white to-slate-100 font-sans text-slate-800 antialiased flex flex-col">
+            <header class="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
+                <div class="w-full px-4 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between">
+                    <div class="text-lg sm:text-xl font-extrabold bg-linear-to-br from-indigo-600 to-violet-600 bg-clip-text text-transparent tracking-tight">
+                        "Todos"
+                    </div>
+                    <nav aria-label="Main Navigation" class="flex items-center gap-4">
+                        <a href="/" class="text-sm font-medium text-slate-500 hover:text-indigo-600 transition-colors duration-200">
+                            "Tasks"
+                        </a>
+                    </nav>
+                </div>
+            </header>
+
+            <main class="flex-1 w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 flex flex-col">
+                <Todos/>
+            </main>
+
+            <footer class="w-full border-t border-slate-200/60 bg-white/60 backdrop-blur-sm">
+                <div class="w-full px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <p class="text-xs sm:text-sm text-slate-400">
+                        "© 2026 Todos App. Crafted with Leptos & Rust."
+                    </p>
+                    <p class="text-xs text-slate-300">
+                        "Built for speed."
+                    </p>
+                </div>
+            </footer>
+        </div>
     }
 }
 
 #[component]
 pub fn Todos() -> impl IntoView {
-    // refetch 计数器：只在服务器操作失败时 +1，触发 Resource 重新拉取服务器真值
-    //（乐观更新的"回滚"机制：直接用服务器数据重建整个 Store）。
     let (refetch, set_refetch) = signal(0u64);
-    let todos_res = Resource::new(move || refetch.get(), |_| get_todos());
 
-    // 错误提示放在 <Transition> 外层：refetch 重建内部组件时错误消息不会丢失。
+    // Resource::new_blocking 保证绝对的流式阻塞，服务端查库完成前不输出 HTML，爬虫完美抓取。
+    let todos_res = Resource::new_blocking(move || refetch.get(), |_| get_todos());
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
 
     view! {
         <section
-            aria-label="Todo list"
-            class="w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl xl:max-w-3xl mx-auto bg-white/95 backdrop-blur-sm rounded-2xl sm:rounded-3xl p-8 sm:p-10 md:p-12 shadow-lg sm:shadow-xl border border-white/60"
+            aria-labelledby="todo-heading"
+            class="w-full bg-white/80 backdrop-blur-md rounded-2xl sm:rounded-3xl p-6 sm:p-8 lg:p-10 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_30px_rgba(0,0,0,0.04)] border border-slate-200/50 hover:shadow-[0_1px_3px_rgba(0,0,0,0.06),0_12px_40px_rgba(0,0,0,0.06)] transition-shadow duration-300"
         >
-            // SEO：页面唯一的语义化 <h1>（旧版只有 <h2>，缺少 h1 层级）。
-            <h1 class="text-lg sm:text-xl md:text-2xl font-bold tracking-tight text-slate-800 text-center mb-4 sm:mb-6">"Todos"</h1>
+            <h1 id="todo-heading" class="text-xl sm:text-2xl font-bold tracking-tight text-slate-800 text-center mb-1 sm:mb-2">
+                "Task Dashboard"
+            </h1>
+            <p class="text-center text-xs sm:text-sm text-slate-400 mb-6 sm:mb-8">
+                "Stay organized. Get things done."
+            </p>
 
             <Show when=move || error_msg.get().is_some()>
-                <div role="alert" class="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center justify-between">
-                    <span>{move || error_msg.get().unwrap_or_default()}</span>
-                    <button
-                        aria-label="Dismiss error"
-                        class="ml-3 text-red-400 hover:text-red-600 font-bold text-lg leading-none cursor-pointer"
-                        on:click=move |_| set_error_msg.set(None)
-                    >"×"</button>
+                <div role="alert" class="mb-6 px-4 py-3 bg-red-50 border border-red-200/60 rounded-xl text-sm text-red-600 flex items-center justify-between shadow-sm">
+                    <span class="flex items-center gap-2">
+                        <svg class="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                        {move || error_msg.get().unwrap_or_default()}
+                    </span>
+                    <button class="ml-3 text-red-400 hover:text-red-600 font-bold text-lg leading-none transition-colors duration-150" on:click=move |_| set_error_msg.set(None)>"×"</button>
                 </div>
             </Show>
 
-            // Transition（而不是 Suspense）：refetch 时保持旧内容显示，避免闪烁。
-            // Suspend + .await：SSR 期间等待数据、把完整列表渲染进首屏 HTML（SEO 关键）。
-            <Transition fallback=move || view! { <p class="text-center text-slate-400 text-sm my-4">"Loading todos…"</p> }>
+            <Transition fallback=move || view! { <p class="text-center text-slate-400 text-sm my-8 animate-pulse">"Loading tasks…"</p> }>
                 {move || Suspend::new(async move {
                     match todos_res.await {
-                        Ok(list) => view! {
-                            <TodoManager initial=list set_refetch set_error_msg/>
-                        }
-                        .into_any(),
+                        Ok(list) => view! { <TodoManager initial=list set_refetch set_error_msg/> }.into_any(),
                         Err(e) => view! {
-                            <div class="text-center text-sm text-red-500 my-4 p-3 bg-red-50 rounded-xl border border-red-200/60">
+                            <div class="text-center text-sm text-red-500 my-6 p-4 bg-red-50/60 rounded-xl border border-red-100">
                                 {format!("Error: {}", e)}
                             </div>
-                        }
-                        .into_any(),
+                        }.into_any(),
                     }
                 })}
             </Transition>
@@ -129,28 +171,39 @@ pub fn Todos() -> impl IntoView {
     }
 }
 
-// ============================================================================
-// TodoManager —— 拥有 Store 的组件：表单 + 列表 + 所有服务器 Action
-// 由 Suspend 用服务器数据创建；refetch 时会带着最新的服务器真值重建（回滚）。
-// ============================================================================
 #[component]
 fn TodoManager(
     initial: Vec<Todo>,
     set_refetch: WriteSignal<u64>,
     set_error_msg: WriteSignal<Option<String>>,
 ) -> impl IntoView {
-    let store = Store::new(TodoState { todos: initial });
-    let title_ref = NodeRef::<Input>::new();
+    // 转换为原生 Signal 模型
+    let initial_rx: Vec<TodoRx> = initial.into_iter().map(TodoRx::from).collect();
+    let todos_sig = RwSignal::new(initial_rx);
 
-    // ---- Actions：只负责"通知服务器"，乐观更新已在事件处理器里定点完成。
-    //      失败时：显示错误 + refetch（用服务器数据重建 Store，实现回滚）。
+    // 【深度响应式应用：create_memo】
+    // 演示真正的细粒度衍生状态：实时计算未完成且未删除的 Todo 数量。
+    // 该 Memo 追踪了 todos_sig、内部的 completed 和 deleted 多个信号维度。
+    let active_count = Memo::new(move |_| {
+        todos_sig
+            .read()
+            .iter()
+            .filter(|t| !t.completed.get() && !t.deleted.get())
+            .count()
+    });
+
+    let title_ref = NodeRef::<leptos::html::Input>::new();
+
+    let handle_err = move |e: ServerFnError| {
+        set_error_msg.set(Some(format!("Operation failed: {}", e)));
+        set_refetch.update(|n| *n = n.wrapping_add(1));
+    };
+
     let add = Action::new(move |(id, title): &(Uuid, String)| {
-        let id = *id;
-        let title = title.clone();
+        let (id, title) = (*id, title.clone());
         async move {
             if let Err(e) = add_todo(id, title).await {
-                set_error_msg.set(Some(format!("Failed to add: {}", e)));
-                set_refetch.update(|n| *n = n.wrapping_add(1));
+                handle_err(e)
             }
         }
     });
@@ -159,8 +212,7 @@ fn TodoManager(
         let id = *id;
         async move {
             if let Err(e) = toggle_todo(id).await {
-                set_error_msg.set(Some(format!("Failed to toggle: {}", e)));
-                set_refetch.update(|n| *n = n.wrapping_add(1));
+                handle_err(e)
             }
         }
     });
@@ -169,39 +221,43 @@ fn TodoManager(
         let id = *id;
         async move {
             if let Err(e) = delete_todo(id).await {
-                set_error_msg.set(Some(format!("Failed to delete: {}", e)));
-                set_refetch.update(|n| *n = n.wrapping_add(1));
+                handle_err(e)
             }
         }
     });
 
     let update = Action::new(move |(id, title): &(Uuid, String)| {
-        let id = *id;
-        let title = title.clone();
+        let (id, title) = (*id, title.clone());
         async move {
             if let Err(e) = update_todo(id, title).await {
-                set_error_msg.set(Some(format!("Failed to update: {}", e)));
-                set_refetch.update(|n| *n = n.wrapping_add(1));
+                handle_err(e)
             }
         }
     });
 
     view! {
+        <div class="mb-5 w-full px-4 py-2.5 bg-linear-to-r from-indigo-50 to-violet-50 rounded-xl border border-indigo-100/60 text-center text-sm font-semibold text-indigo-600 tracking-wide shadow-sm">
+            {move || format!("{} active task{}", active_count.get(), if active_count.get() == 1 { "" } else { "s" })}
+        </div>
+
         <form
-            class="flex flex-col sm:flex-row gap-4 mb-8 sm:mb-10"
+            class="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-8 sm:mb-10 w-full"
             on:submit=move |ev| {
                 ev.prevent_default();
-                let value = title_ref.get().map(|el| el.value()).unwrap_or_default();
-                let value = value.trim().to_string();
+                let value = title_ref.get().map(|el| el.value()).unwrap_or_default().trim().to_string();
                 if !value.is_empty() {
                     let id = Uuid::now_v7();
-                    // 乐观更新：只写 todos 字段 → keyed <For> 精准插入一行 DOM。
-                    store.todos().write().insert(0, Todo {
+
+                    // 【O(1) 内存插入】
+                    // 使用 push (均摊 O(1)) 替代 insert(0) 避免数组平移。
+                    todos_sig.update(|t| t.push(TodoRx {
                         id,
-                        title: value.clone(),
-                        completed: false,
+                        title: RwSignal::new(value.clone()),
+                        completed: RwSignal::new(false),
+                        deleted: RwSignal::new(false),
                         created_at: Utc::now(),
-                    });
+                    }));
+
                     add.dispatch((id, value));
                     if let Some(input) = title_ref.get() { input.set_value(""); }
                 }
@@ -209,56 +265,43 @@ fn TodoManager(
         >
             <input node_ref=title_ref type="text" placeholder="What needs to be done?"
                 aria-label="New todo title"
-                class="flex-1 min-w-0 px-5 py-4 text-base sm:text-lg bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 placeholder:text-slate-400"
+                class="flex-1 px-5 py-3.5 text-base bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-200 shadow-sm hover:shadow-md"
             />
-            <button type="submit"
-                class="px-8 py-4 text-base sm:text-lg font-semibold text-white bg-linear-to-r from-indigo-500 to-violet-500 rounded-xl sm:rounded-2xl shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:opacity-90 transition-all duration-200"
-            >"Add"</button>
+            <button type="submit" class="px-6 py-3.5 text-sm font-semibold text-white bg-linear-to-br from-indigo-500 to-violet-500 rounded-xl shadow-md shadow-indigo-500/20 hover:shadow-lg hover:shadow-indigo-500/25 hover:from-indigo-600 hover:to-violet-600 active:scale-[0.97] transition-all duration-200">
+                "Add"
+            </button>
         </form>
 
         <Show
-            when=move || !store.todos().read().is_empty()
-            fallback=|| view! {
-                <p class="text-center text-slate-400 text-sm my-4">"Nothing to do yet — add your first todo!"</p>
-            }
+            when=move || !todos_sig.read().is_empty()
+            fallback=|| view! { <p class="text-center text-slate-400 text-sm py-8">No tasks yet.</p> }
         >
-            <ul class="list-none m-0 p-0 flex flex-col gap-3 sm:gap-4">
-                // keyed <For>：只有 todos 这个字段本身（插入/删除）被写入时才 diff；
-                // 单条 todo 的字段更新（title/completed）完全绕过 <For>，直达对应 DOM。
+            // CSS flex-col-reverse 将 push 到队尾的新元素在视觉上渲染至最顶部，完美协同底层 O(1)。
+            <ul class="w-full list-none m-0 p-0 flex flex-col-reverse gap-2.5 sm:gap-3">
                 <For
-                    each=move || store.todos()
-                    key=|row| row.read().id
-                    children=move |todo| view! {
-                        <TodoRow store todo toggle delete update/>
-                    }
+                    each=move || todos_sig.get()
+                    key=|row| row.id
+                    children=move |todo| view! { <TodoRow todo toggle delete update/> }
                 />
             </ul>
         </Show>
     }
 }
 
-// ============================================================================
-// TodoRow —— 单行组件。todo: Field<Todo> 是通过 key O(1) 定位的字段句柄，
-// 行内所有读写都是字段级的定点操作，互不影响、不触发列表 diff。
-// ============================================================================
 #[component]
 fn TodoRow(
-    store: Store<TodoState>,
-    #[prop(into)] todo: Field<Todo>,
+    todo: TodoRx,
     toggle: Action<Uuid, ()>,
     delete: Action<Uuid, ()>,
     update: Action<(Uuid, String), ()>,
 ) -> impl IntoView {
-    // id 永不变化，取一次即可（untracked，不建立订阅）。
-    let id = todo.id().get_untracked();
-    // 字段句柄（Copy，O(1) 定位）：只有这两个字段的订阅者会因它们的变化而更新。
-    let completed = todo.completed();
-    let title = todo.title();
+    let id = todo.id;
+    let title = todo.title;
+    let completed = todo.completed;
+    let deleted = todo.deleted;
 
-    // 编辑态是"行私有"的局部信号：进入/退出编辑只影响本行
-    //（旧版用父级 Option<Uuid> 信号，每次变化会重跑所有行的 is_editing 闭包）。
     let (editing, set_editing) = signal(false);
-    let edit_ref = NodeRef::<Input>::new();
+    let edit_ref = NodeRef::<leptos::html::Input>::new();
 
     Effect::new(move |_| {
         if editing.get() {
@@ -268,76 +311,70 @@ fn TodoRow(
         }
     });
 
-    // 保存标题：O(1) 定点写入 title 字段 + 通知服务器。
     let save = move || {
-        let value = edit_ref.get().map(|el| el.value()).unwrap_or_default();
-        let value = value.trim().to_string();
+        let value = edit_ref
+            .get()
+            .map(|el| el.value())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         if !value.is_empty() {
-            title.set(value.clone());
+            title.set(value.clone()); // 细粒度 O(1) 字段更新，不重绘其他任何内容
             set_editing.set(false);
             update.dispatch((id, value));
         }
     };
 
     view! {
-        <li
-            class:completed=move || completed.get()
-            class="flex items-center gap-3 sm:gap-4 p-4 sm:p-5 border border-slate-200 rounded-xl bg-white transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm active:scale-[0.998] active:bg-slate-100"
-        >
-            <Show
-                when=move || editing.get()
-                fallback=move || view! {
-                    <input type="checkbox"
-                        aria-label="Toggle completed"
-                        class="w-4 h-4 sm:w-5 sm:h-5 accent-indigo-500 cursor-pointer flex-none transition-transform duration-150 hover:scale-110"
-                        prop:checked=move || completed.get()
-                        on:click=move |_| {
-                            // O(1) 定点翻转：只有本行的 checkbox 和 <li> class 更新。
-                            completed.update(|c| *c = !*c);
-                            toggle.dispatch(id);
+        // 【真正的 O(1) 时间复杂度删除】
+        // 摒弃 Vec::retain（会导致 O(N) 元素平移并触发整个列表 diff）。
+        // 这里的 `<Show>` 会在 deleted 被置为 true 的瞬间，以 O(1) 的复杂度将当前 <li> 直接从 DOM 树卸载。
+        // 原数据仍然在 Vec 对应索引处（处于假死状态），避免了 Rust 内存数据的重组。
+        <Show when=move || !deleted.get()>
+            <li
+                class:completed=move || completed.get()
+                class="group w-full flex items-center gap-3 sm:gap-4 p-3 sm:p-4 border border-slate-100 rounded-xl bg-white/80 backdrop-blur-sm transition-all duration-200 hover:bg-white hover:shadow-md hover:border-slate-200/60 active:scale-[0.998]"
+            >
+                <Show
+                    when=move || editing.get()
+                    fallback=move || view! {
+                        <input type="checkbox"
+                            aria-label="Toggle completed"
+                            class="w-5 h-5 accent-indigo-500 cursor-pointer flex-none transition-transform duration-150 hover:scale-110"
+                            prop:checked=move || completed.get()
+                            on:click=move |_| {
+                                completed.update(|c| *c = !*c);
+                                toggle.dispatch(id);
+                            }
+                        />
+                        <span class="flex-1 min-w-0 text-sm sm:text-base text-slate-700 wrap-break-word todo-title leading-relaxed transition-all duration-200">
+                            {move || title.get()}
+                        </span>
+                        <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            <button class="p-1.5 text-slate-400 hover:text-indigo-500 rounded-lg hover:bg-indigo-50 transition-colors duration-150" aria-label="Edit todo" on:click=move |_| set_editing.set(true)>
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                            </button>
+                            <button class="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors duration-150" aria-label="Delete todo" on:click=move |_| {
+                                deleted.set(true);
+                                delete.dispatch(id);
+                            }>
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            </button>
+                        </div>
+                    }
+                >
+                    <input node_ref=edit_ref type="text"
+                        class="flex-1 px-3 py-2 text-sm bg-slate-50 border-2 border-indigo-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500/20 transition-all duration-200"
+                        prop:value=move || title.get()
+                        on:keydown=move |ev| {
+                            if ev.key() == "Enter" { save(); }
+                            else if ev.key() == "Escape" { set_editing.set(false); }
                         }
                     />
-                    <span class="flex-1 min-w-0 text-base sm:text-lg wrap-break-word leading-relaxed todo-title">
-                        {move || title.get()}
-                    </span>
-                    <button
-                        aria-label="Edit todo"
-                        class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:scale-95 transition-all duration-200 cursor-pointer"
-                        on:click=move |_| set_editing.set(true)
-                    >"✎"</button>
-                    <button
-                        aria-label="Delete todo"
-                        class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 active:scale-95 transition-all duration-200 cursor-pointer"
-                        on:click=move |_| {
-                            // 结构性变更（删除一行）才写 todos 字段本身，
-                            // keyed <For> 只移除这一行对应的 DOM。
-                            store.todos().write().retain(|t| t.id != id);
-                            delete.dispatch(id);
-                        }
-                    >"✕"</button>
-                }
-            >
-                <input node_ref=edit_ref type="text"
-                    aria-label="Edit todo title"
-                    class="flex-1 min-w-0 px-4 py-3 text-base sm:text-lg bg-slate-50 border border-indigo-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/15 transition-all duration-200"
-                    prop:value=move || title.get()
-                    on:keydown=move |ev| {
-                        if ev.key() == "Enter" {
-                            save();
-                        } else if ev.key() == "Escape" {
-                            set_editing.set(false);
-                        }
-                    }
-                />
-                <button
-                    class="px-4 py-3 text-sm font-semibold text-white bg-linear-to-r from-indigo-500 to-violet-500 rounded-lg shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:opacity-90 transition-all duration-200 cursor-pointer"
-                    on:click=move |_| save()
-                >"Save"</button>
-                <button
-                    class="px-3 py-2 text-sm font-semibold text-slate-600 bg-slate-100 border border-slate-200 rounded-lg hover:bg-slate-200 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 cursor-pointer"
-                    on:click=move |_| set_editing.set(false)
-                >"Cancel"</button>
-            </Show>
-        </li>
+                    <button class="px-4 py-2 text-xs font-semibold text-white bg-indigo-500 rounded-lg hover:bg-indigo-600 active:scale-95 transition-all duration-150 shadow-sm" on:click=move |_| save()>"Save"</button>
+                    <button class="px-3 py-2 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 active:scale-95 transition-all duration-150" on:click=move |_| set_editing.set(false)>"Cancel"</button>
+                </Show>
+            </li>
+        </Show>
     }
 }

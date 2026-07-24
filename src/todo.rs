@@ -1,23 +1,10 @@
-// ============================================================================
-// todo.rs —— 数据模型 + 服务器函数(server functions)
-// ----------------------------------------------------------------------------
-// 这个文件是"前后端的桥梁"，包含两部分：
-//   1) Todo 结构体：一条待办的数据形状，前后端【共用同一个定义】。
-//   2) 5 个带 #[server] 的函数：增删改查逻辑。它们的函数体只在服务器上运行，
-//      但可以在客户端代码里【像普通异步函数一样调用】——Leptos 会自动把这次调用
-//      变成一次到服务器的 HTTP 请求。这就是"全栈同构"最神奇的地方。
-// ============================================================================
-
 use chrono::{DateTime, Utc};
 use leptos::prelude::*;
-use reactive_stores::Store;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// derive(Store)：为 Todo 生成 TodoStoreFields trait，使每个字段（title/completed…）
-// 都成为独立的细粒度响应式节点 —— 修改某一条 todo 的某个字段，只会通知
-// 订阅了【那个字段】的 DOM 节点，其它行完全不动。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Store)]
+// 前后端共享核心结构 (移除了第三方 Store 宏)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Todo {
     pub id: Uuid,
     pub title: String,
@@ -28,8 +15,12 @@ pub struct Todo {
 #[server]
 pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
     let pool = expect_context::<sqlx::PgPool>();
+
+    // 【配合 O(1) 策略】改为 ASC 升序查询。
+    // 旧数据在前，新数据追加至 Vec 尾部 (push 是均摊 O(1))，
+    // 再利用前端 CSS flex-col-reverse 天然逆序展示，将完美实现插入效率最大化。
     let rows = sqlx::query_as::<_, (Uuid, String, bool, DateTime<Utc>)>(
-        "SELECT id, title, completed, created_at FROM todos ORDER BY created_at DESC",
+        "SELECT id, title, completed, created_at FROM todos ORDER BY created_at ASC",
     )
     .fetch_all(&pool)
     .await
@@ -46,7 +37,6 @@ pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
         .collect())
 }
 
-// -------------------- 服务器函数 2：新增一条待办 --------------------
 #[server]
 pub async fn add_todo(id: Uuid, title: String) -> Result<(), ServerFnError> {
     let title = title.trim().to_string();
@@ -63,7 +53,6 @@ pub async fn add_todo(id: Uuid, title: String) -> Result<(), ServerFnError> {
     Ok(())
 }
 
-// -------------------- 服务器函数 3：切换完成状态 --------------------
 #[server]
 pub async fn toggle_todo(id: Uuid) -> Result<(), ServerFnError> {
     let pool = expect_context::<sqlx::PgPool>();
@@ -75,7 +64,6 @@ pub async fn toggle_todo(id: Uuid) -> Result<(), ServerFnError> {
     Ok(())
 }
 
-// -------------------- 服务器函数 4：删除一条待办 --------------------
 #[server]
 pub async fn delete_todo(id: Uuid) -> Result<(), ServerFnError> {
     let pool = expect_context::<sqlx::PgPool>();
@@ -87,7 +75,6 @@ pub async fn delete_todo(id: Uuid) -> Result<(), ServerFnError> {
     Ok(())
 }
 
-// -------------------- 服务器函数 5：修改标题 --------------------
 #[server]
 pub async fn update_todo(id: Uuid, title: String) -> Result<(), ServerFnError> {
     let title = title.trim().to_string();
