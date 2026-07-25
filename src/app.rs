@@ -93,7 +93,7 @@ pub fn App() -> impl IntoView {
         <Meta name="twitter:image" content=format!("{}/twitter-image.jpg", site_url)/>
 
         // 【SEO优化：语义化 HTML 地标 (Landmarks)】
-        <div class="w-full h-screen bg-linear-to-b from-slate-50 via-white to-slate-100 font-sans text-slate-800 antialiased flex flex-col">
+        <div class="w-full min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-100 font-sans text-slate-800 antialiased flex flex-col">
             <header class="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
                 <div class="w-full px-4 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between">
                     <div class="text-lg sm:text-xl font-extrabold bg-linear-to-br from-indigo-600 to-violet-600 bg-clip-text text-transparent tracking-tight">
@@ -110,17 +110,6 @@ pub fn App() -> impl IntoView {
             <main class="flex-1 w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 flex flex-col">
                 <Todos/>
             </main>
-
-            <footer class="w-full border-t border-slate-200/60 bg-white/60 backdrop-blur-sm">
-                <div class="w-full px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-                    <p class="text-xs sm:text-sm text-slate-400">
-                        "© 2026 Todos App. Crafted with Leptos & Rust."
-                    </p>
-                    <p class="text-xs text-slate-300">
-                        "Built for speed."
-                    </p>
-                </div>
-            </footer>
         </div>
     }
 }
