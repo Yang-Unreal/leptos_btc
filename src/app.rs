@@ -311,25 +311,7 @@ fn TodoRow(
         }
     });
 
-    let save = move || {
-        let value = edit_ref
-            .get()
-            .map(|el| el.value())
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        if !value.is_empty() {
-            title.set(value.clone()); // 细粒度 O(1) 字段更新，不重绘其他任何内容
-            set_editing.set(false);
-            update.dispatch((id, value));
-        }
-    };
-
     view! {
-        // 【真正的 O(1) 时间复杂度删除】
-        // 摒弃 Vec::retain（会导致 O(N) 元素平移并触发整个列表 diff）。
-        // 这里的 `<Show>` 会在 deleted 被置为 true 的瞬间，以 O(1) 的复杂度将当前 <li> 直接从 DOM 树卸载。
-        // 原数据仍然在 Vec 对应索引处（处于假死状态），避免了 Rust 内存数据的重组。
         <Show when=move || !deleted.get()>
             <li
                 class:completed=move || completed.get()
@@ -337,44 +319,84 @@ fn TodoRow(
             >
                 <Show
                     when=move || editing.get()
-                    fallback=move || view! {
-                        <input type="checkbox"
-                            aria-label="Toggle completed"
-                            class="w-5 h-5 accent-indigo-500 cursor-pointer flex-none transition-transform duration-150 hover:scale-110"
-                            prop:checked=move || completed.get()
-                            on:click=move |_| {
-                                completed.update(|c| *c = !*c);
-                                toggle.dispatch(id);
-                            }
-                        />
-                        <span class="flex-1 min-w-0 text-sm sm:text-base text-slate-700 wrap-break-word todo-title leading-relaxed transition-all duration-200">
-                            {move || title.get()}
-                        </span>
-                        <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                            <button class="p-1.5 text-slate-400 hover:text-indigo-500 rounded-lg hover:bg-indigo-50 transition-colors duration-150" aria-label="Edit todo" on:click=move |_| set_editing.set(true)>
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                            </button>
-                            <button class="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors duration-150" aria-label="Delete todo" on:click=move |_| {
-                                deleted.set(true);
-                                delete.dispatch(id);
-                            }>
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                            </button>
-                        </div>
-                    }
+                    fallback=move || view! { <TodoDisplay id=id title=title completed=completed toggle=toggle delete=delete deleted=deleted set_editing=set_editing/> }
                 >
-                    <input node_ref=edit_ref type="text"
-                        class="flex-1 px-3 py-2 text-sm bg-slate-50 border-2 border-indigo-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500/20 transition-all duration-200"
-                        prop:value=move || title.get()
-                        on:keydown=move |ev| {
-                            if ev.key() == "Enter" { save(); }
-                            else if ev.key() == "Escape" { set_editing.set(false); }
-                        }
-                    />
-                    <button class="px-4 py-2 text-xs font-semibold text-white bg-indigo-500 rounded-lg hover:bg-indigo-600 active:scale-95 transition-all duration-150 shadow-sm" on:click=move |_| save()>"Save"</button>
-                    <button class="px-3 py-2 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 active:scale-95 transition-all duration-150" on:click=move |_| set_editing.set(false)>"Cancel"</button>
+                    <TodoEdit id=id title=title set_editing=set_editing update=update edit_ref=edit_ref/>
                 </Show>
             </li>
         </Show>
+    }
+}
+
+#[component]
+fn TodoDisplay(
+    id: Uuid,
+    title: RwSignal<String>,
+    completed: RwSignal<bool>,
+    toggle: Action<Uuid, ()>,
+    delete: Action<Uuid, ()>,
+    deleted: RwSignal<bool>,
+    set_editing: WriteSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <input type="checkbox"
+            aria-label="Toggle completed"
+            class="w-5 h-5 accent-indigo-500 cursor-pointer flex-none transition-transform duration-150 hover:scale-110"
+            prop:checked=move || completed.get()
+            on:click=move |_| {
+                completed.update(|c| *c = !*c);
+                toggle.dispatch(id);
+            }
+        />
+        <span class="flex-1 min-w-0 text-sm sm:text-base text-slate-700 wrap-break-word todo-title leading-relaxed transition-all duration-200">
+            {move || title.get()}
+        </span>
+        <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <button class="p-1.5 text-slate-400 hover:text-indigo-500 rounded-lg hover:bg-indigo-50 transition-colors duration-150" aria-label="Edit todo" on:click=move |_| set_editing.set(true)>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            </button>
+            <button class="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors duration-150" aria-label="Delete todo" on:click=move |_| {
+                deleted.set(true);
+                delete.dispatch(id);
+            }>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+        </div>
+    }
+}
+
+#[component]
+fn TodoEdit(
+    id: Uuid,
+    title: RwSignal<String>,
+    set_editing: WriteSignal<bool>,
+    update: Action<(Uuid, String), ()>,
+    edit_ref: NodeRef<leptos::html::Input>,
+) -> impl IntoView {
+    view! {
+        <input node_ref=edit_ref type="text"
+            class="flex-1 px-3 py-2 text-sm bg-slate-50 border-2 border-indigo-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500/20 transition-all duration-200"
+            prop:value=move || title.get()
+            on:keydown=move |ev| {
+                if ev.key() == "Enter" {
+                    let value = edit_ref.get().map(|el| el.value()).unwrap_or_default().trim().to_string();
+                    if !value.is_empty() {
+                        title.set(value.clone());
+                        set_editing.set(false);
+                        update.dispatch((id, value));
+                    }
+                }
+                else if ev.key() == "Escape" { set_editing.set(false); }
+            }
+        />
+        <button class="px-4 py-2 text-xs font-semibold text-white bg-indigo-500 rounded-lg hover:bg-indigo-600 active:scale-95 transition-all duration-150 shadow-sm" on:click=move |_| {
+            let value = edit_ref.get().map(|el| el.value()).unwrap_or_default().trim().to_string();
+            if !value.is_empty() {
+                title.set(value.clone());
+                set_editing.set(false);
+                update.dispatch((id, value));
+            }
+        }>"Save"</button>
+        <button class="px-3 py-2 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 active:scale-95 transition-all duration-150" on:click=move |_| set_editing.set(false)>"Cancel"</button>
     }
 }
