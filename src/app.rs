@@ -6,13 +6,13 @@ use uuid::Uuid;
 
 // ----------------------------------------------------------------------------
 // 纯原生细粒度模型 (Vanilla Fine-grained Reactivity)
+// 剔除所有冗余的“伪优化”字段，保持模型最纯洁的数据状态
 // ----------------------------------------------------------------------------
 #[derive(Clone, Debug)]
 pub struct TodoRx {
     pub id: Uuid,
     pub title: RwSignal<String>,
     pub completed: RwSignal<bool>,
-    pub deleted: RwSignal<bool>, // 墓碑标记 (Tombstone marker)
     pub created_at: chrono::DateTime<Utc>,
 }
 
@@ -22,20 +22,16 @@ impl From<Todo> for TodoRx {
             id: todo.id,
             title: RwSignal::new(todo.title),
             completed: RwSignal::new(todo.completed),
-            deleted: RwSignal::new(false),
             created_at: todo.created_at,
         }
     }
 }
 
-// ----------------------------------------------------------------------------
-// 全局上下文：用于跨组件的 O(1) 计数与墓碑回收机制
-// ----------------------------------------------------------------------------
+// 全局上下文：只保留最纯粹的数据集和 O(1) 的衍生计数状态
 #[derive(Clone, Copy)]
 struct TodoContext {
     todos_sig: RwSignal<Vec<TodoRx>>,
-    active_count: RwSignal<usize>,    // 严格 O(1) 的数学计数，拒绝迭代
-    tombstone_count: RwSignal<usize>, // 幽灵节点计数，用于平摊 O(1) 的垃圾回收
+    active_count: RwSignal<usize>,
 }
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -80,7 +76,6 @@ pub fn App() -> impl IntoView {
     view! {
         <Stylesheet id="leptos" href="/pkg/leptos_btc.css"/>
 
-        // 全套 SEO 元信息
         <Title text="Todos — Fast Full-Stack Todo App"/>
         <Meta name="description" content="A blazingly fast, server-side rendered todo list built with Leptos, Rust, Axum, and PostgreSQL."/>
         <Meta name="theme-color" content="#4f46e5"/>
@@ -117,11 +112,8 @@ pub fn Todos() -> impl IntoView {
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
 
     view! {
-        <section
-            aria-labelledby="todo-heading"
-            class="w-full bg-white/80 backdrop-blur-md rounded-2xl sm:rounded-3xl p-6 sm:p-8 lg:p-10 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_30px_rgba(0,0,0,0.04)] border border-slate-200/50 hover:shadow-[0_1px_3px_rgba(0,0,0,0.06),0_12px_40px_rgba(0,0,0,0.06)] transition-shadow duration-300"
-        >
-            <h1 id="todo-heading" class="text-xl sm:text-2xl font-bold tracking-tight text-slate-800 text-center mb-1 sm:mb-2">
+        <section class="w-full bg-white/80 backdrop-blur-md rounded-2xl sm:rounded-3xl p-6 sm:p-8 lg:p-10 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_30px_rgba(0,0,0,0.04)] border border-slate-200/50 hover:shadow-[0_1px_3px_rgba(0,0,0,0.06),0_12px_40px_rgba(0,0,0,0.06)] transition-shadow duration-300">
+            <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-slate-800 text-center mb-1 sm:mb-2">
                 "Task Dashboard"
             </h1>
 
@@ -152,21 +144,18 @@ fn TodoManager(
 ) -> impl IntoView {
     let initial_rx: Vec<TodoRx> = initial.into_iter().map(TodoRx::from).collect();
 
-    // 【完美优化 1：彻底消灭 O(N) 遍历计数】
-    // 将计数器作为一个独立的数学变量，而不是依赖数组的衍生计算
+    // 初始化活跃项计数
     let initial_count = initial_rx
         .iter()
-        .filter(|t| !t.completed.get_untracked() && !t.deleted.get_untracked())
+        .filter(|t| !t.completed.get_untracked())
         .count();
 
     let todos_sig = RwSignal::new(initial_rx);
     let active_count = RwSignal::new(initial_count);
-    let tombstone_count = RwSignal::new(0usize); // 幽灵节点水位线
 
     provide_context(TodoContext {
         todos_sig,
         active_count,
-        tombstone_count,
     });
 
     let title_ref = NodeRef::<leptos::html::Input>::new();
@@ -213,7 +202,6 @@ fn TodoManager(
 
     view! {
         <div class="mb-5 w-full px-4 py-2.5 bg-linear-to-r from-indigo-50 to-violet-50 rounded-xl border border-indigo-100/60 text-center text-sm font-semibold text-indigo-600 tracking-wide shadow-sm">
-            // 直接读取数字信号，O(1)
             {move || format!("{} active task{}", active_count.get(), if active_count.get() == 1 { "" } else { "s" })}
         </div>
 
@@ -224,11 +212,11 @@ fn TodoManager(
                 let value = title_ref.get().map(|el| el.value()).unwrap_or_default().trim().to_string();
                 if !value.is_empty() {
                     let id = Uuid::now_v7();
-                    // O(1) 内存插入
+
+                    // O(1) 插入：直接推入队尾，配合 CSS Flex-col-reverse
                     todos_sig.update(|t| t.push(TodoRx {
-                        id, title: RwSignal::new(value.clone()), completed: RwSignal::new(false), deleted: RwSignal::new(false), created_at: Utc::now()
+                        id, title: RwSignal::new(value.clone()), completed: RwSignal::new(false), created_at: Utc::now()
                     }));
-                    // O(1) 计数更新
                     active_count.update(|c| *c += 1);
 
                     add.dispatch((id, value));
@@ -244,6 +232,8 @@ fn TodoManager(
 
         <Show when=move || !todos_sig.read().is_empty()>
             <ul class="w-full list-none m-0 p-0 flex flex-col-reverse gap-2.5">
+                // 完全信任 Leptos 的 Keyed <For> 组件
+                // 只要这里的 Vec 发生改变，Leptos 会以极高的效率自动定位并卸载 DOM 节点
                 <For
                     each=move || todos_sig.get()
                     key=|row| row.id
@@ -261,13 +251,11 @@ fn TodoRow(
     delete: Action<Uuid, ()>,
     update: Action<(Uuid, String), ()>,
 ) -> impl IntoView {
-    // 注入上下文以执行 O(1) 的更新和垃圾回收
     let ctx = expect_context::<TodoContext>();
 
     let id = todo.id;
     let title = todo.title;
     let completed = todo.completed;
-    let deleted = todo.deleted;
 
     let (editing, set_editing) = signal(false);
     let edit_ref = NodeRef::<leptos::html::Input>::new();
@@ -281,16 +269,13 @@ fn TodoRow(
     });
 
     view! {
-        // DOM 的 O(1) 瞬间卸载
-        <Show when=move || !deleted.get()>
-            <li class:completed=move || completed.get() class="group w-full flex items-center gap-3 p-3 border border-slate-100 rounded-xl bg-white/80 transition-all">
-                <Show when=move || editing.get() fallback=move || view! {
-                    <TodoDisplay id title completed toggle delete deleted set_editing ctx/>
-                }>
-                    <TodoEdit id title set_editing update edit_ref/>
-                </Show>
-            </li>
-        </Show>
+        <li class:completed=move || completed.get() class="group w-full flex items-center gap-3 p-3 border border-slate-100 rounded-xl bg-white/80 transition-all">
+            <Show when=move || editing.get() fallback=move || view! {
+                <TodoDisplay id title completed toggle delete set_editing ctx/>
+            }>
+                <TodoEdit id title set_editing update edit_ref/>
+            </Show>
+        </li>
     }
 }
 
@@ -301,57 +286,50 @@ fn TodoDisplay(
     completed: RwSignal<bool>,
     toggle: Action<Uuid, ()>,
     delete: Action<Uuid, ()>,
-    deleted: RwSignal<bool>,
     set_editing: WriteSignal<bool>,
     ctx: TodoContext,
 ) -> impl IntoView {
     view! {
-           <input type="checkbox"
-               class="w-5 h-5 accent-indigo-500 cursor-pointer flex-none"
-               prop:checked=move || completed.get()
-               on:click=move |_| {
-                   let current = completed.get_untracked();
-                   completed.set(!current); // O(1) 状态反转
+        <input type="checkbox"
+            class="w-5 h-5 accent-indigo-500 cursor-pointer flex-none"
+            prop:checked=move || completed.get()
+            on:click=move |_| {
+                let current = completed.get_untracked();
+                completed.set(!current);
 
-                   // O(1) 纯数学增减，不遍历数组！
-                   if !current { ctx.active_count.update(|c| *c = c.saturating_sub(1)); }
-                   else { ctx.active_count.update(|c| *c += 1); }
+                // 纯数学增减，保持极致性能
+                if !current { ctx.active_count.update(|c| *c = c.saturating_sub(1)); }
+                else { ctx.active_count.update(|c| *c += 1); }
 
-                   toggle.dispatch(id);
-               }
-           />
-    <span
-               class="flex-1 min-w-0 text-sm sm:text-base wrap-break-word transition-all duration-200"
-               class:line-through=move || completed.get()
-               class:text-slate-400=move || completed.get()
-               class:text-slate-700=move || !completed.get()
-           >
-               {move || title.get()}
-           </span>
-           <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100">
-               <button class="p-1.5 text-slate-400 hover:text-indigo-500" on:click=move |_| set_editing.set(true)>"✎"</button>
-               <button class="p-1.5 text-slate-400 hover:text-red-500" on:click=move |_| {
-                   // 1. O(1) UI 隐藏
-                   deleted.set(true);
+                toggle.dispatch(id);
+            }
+        />
 
-                   // 2. O(1) 同步活跃计数
-                   if !completed.get_untracked() {
-                       ctx.active_count.update(|c| *c = c.saturating_sub(1));
-                   }
+        <span
+            class="flex-1 min-w-0 text-sm sm:text-base wrap-break-word transition-all duration-200"
+            class:line-through=move || completed.get()
+            class:text-slate-400=move || completed.get()
+            class:text-slate-700=move || !completed.get()
+        >
+            {move || title.get()}
+        </span>
 
-                   // 【完美优化 2：平摊 O(1) 垃圾回收机制 (Tombstone Sweeping)】
-                   // 解决内存泄漏与渲染幽灵节点的负担，同时避免了次次 O(N) 移动数组。
-                   ctx.tombstone_count.update(|c| *c += 1);
-                   if ctx.tombstone_count.get_untracked() >= 30 {
-                       // 当幽灵节点堆积超过 30 个时，集中做一次 O(N) 物理大清理
-                       ctx.todos_sig.update(|t| t.retain(|todo| !todo.deleted.get_untracked()));
-                       ctx.tombstone_count.set(0); // 清空水位线
-                   }
+        <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100">
+            <button class="p-1.5 text-slate-400 hover:text-indigo-500 transition-colors" on:click=move |_| set_editing.set(true)>"✎"</button>
+            <button class="p-1.5 text-slate-400 hover:text-red-500 transition-colors" on:click=move |_| {
+                // 【方案 A 的体现】：直接在真实数据源上执行清理，不留任何隐患
+                if !completed.get_untracked() {
+                    ctx.active_count.update(|c| *c = c.saturating_sub(1));
+                }
 
-                   delete.dispatch(id);
-               }>"✕"</button>
-           </div>
-       }
+                // Rust Vec 的 retain 在 Wasm 内存中仅消耗纳秒级，
+                // 随后 Leptos <For> 会根据 ID 的消失，瞬间精准卸载对应的 <li>
+                ctx.todos_sig.update(|t| t.retain(|todo| todo.id != id));
+
+                delete.dispatch(id);
+            }>"✕"</button>
+        </div>
+    }
 }
 
 #[component]
@@ -370,7 +348,7 @@ fn TodoEdit(
                 if ev.key() == "Enter" {
                     let value = edit_ref.get().map(|el| el.value()).unwrap_or_default().trim().to_string();
                     if !value.is_empty() {
-                        title.set(value.clone()); // O(1)
+                        title.set(value.clone());
                         set_editing.set(false);
                         update.dispatch((id, value));
                     }
