@@ -61,12 +61,12 @@ WORKDIR /app
 
 # The server binary and the compiled site (HTML, JS, WASM, CSS).
 COPY --from=builder /app/target/release/leptos_btc /app/leptos_btc
-COPY --from=builder /app/target/site /app/site
+COPY --from=builder /app/target/site /app/target/site
 
 # Tell the binary where to find assets and what address to bind.
 # site-addr in Cargo.toml is 127.0.0.1:3000; override to 0.0.0.0 so the
 # container is reachable from outside.
-ENV LEPTOS_SITE_ROOT=/app/site
+ENV LEPTOS_SITE_ROOT=/app/target/site
 ENV LEPTOS_SITE_ADDR=0.0.0.0:3000
 ENV LEPTOS_ENV=PROD
 
