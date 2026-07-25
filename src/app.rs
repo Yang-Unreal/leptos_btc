@@ -4,17 +4,15 @@ use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
 use uuid::Uuid;
 
-// ============================================================================
+// ----------------------------------------------------------------------------
 // 纯原生细粒度模型 (Vanilla Fine-grained Reactivity)
-// 抛弃第三方 Store，完全使用 Leptos 原生 RwSignal 构建状态树。
-// ============================================================================
+// ----------------------------------------------------------------------------
 #[derive(Clone, Debug)]
 pub struct TodoRx {
     pub id: Uuid,
     pub title: RwSignal<String>,
     pub completed: RwSignal<bool>,
-    // 核心重构：引入逻辑删除状态，实现严格 O(1) 的删除复杂度
-    pub deleted: RwSignal<bool>,
+    pub deleted: RwSignal<bool>, // 墓碑标记 (Tombstone marker)
     pub created_at: chrono::DateTime<Utc>,
 }
 
@@ -30,6 +28,16 @@ impl From<Todo> for TodoRx {
     }
 }
 
+// ----------------------------------------------------------------------------
+// 全局上下文：用于跨组件的 O(1) 计数与墓碑回收机制
+// ----------------------------------------------------------------------------
+#[derive(Clone, Copy)]
+struct TodoContext {
+    todos_sig: RwSignal<Vec<TodoRx>>,
+    active_count: RwSignal<usize>,    // 严格 O(1) 的数学计数，拒绝迭代
+    tombstone_count: RwSignal<usize>, // 幽灵节点计数，用于平摊 O(1) 的垃圾回收
+}
+
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -42,7 +50,6 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <link rel="icon" href="/icon.svg" media="(prefers-color-scheme: light)" />
                 <link rel="icon" href="/icon-dark.svg" media="(prefers-color-scheme: dark)" />
 
-                // 【SEO优化：JSON-LD 结构化数据】
                 <script type="application/ld+json">
                     {r#"
                     {
@@ -73,40 +80,29 @@ pub fn App() -> impl IntoView {
     view! {
         <Stylesheet id="leptos" href="/pkg/leptos_btc.css"/>
 
-        // 【SEO优化：全套 Meta 标签与 Canonical URL】
+        // 全套 SEO 元信息
         <Title text="Todos — Fast Full-Stack Todo App"/>
         <Meta name="description" content="A blazingly fast, server-side rendered todo list built with Leptos, Rust, Axum, and PostgreSQL."/>
         <Meta name="theme-color" content="#4f46e5"/>
         <Link rel="canonical" href=site_url/>
-
-        // Open Graph
         <Meta property="og:type" content="website"/>
         <Meta property="og:url" content=site_url/>
         <Meta property="og:title" content="Todos — Fast Full-Stack Todo App"/>
         <Meta property="og:description" content="A blazingly fast, server-side rendered todo list built with Leptos and Rust."/>
         <Meta property="og:image" content=format!("{}/og-image.jpg", site_url)/>
-
-        // Twitter Cards
         <Meta name="twitter:card" content="summary_large_image"/>
         <Meta name="twitter:title" content="Todos — Fast Full-Stack Todo App"/>
         <Meta name="twitter:description" content="A blazingly fast, server-side rendered todo list built with Leptos and Rust."/>
         <Meta name="twitter:image" content=format!("{}/twitter-image.jpg", site_url)/>
 
-        // 【SEO优化：语义化 HTML 地标 (Landmarks)】
         <div class="w-full min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-100 font-sans text-slate-800 antialiased flex flex-col">
             <header class="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
                 <div class="w-full px-4 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between">
                     <div class="text-lg sm:text-xl font-extrabold bg-linear-to-br from-indigo-600 to-violet-600 bg-clip-text text-transparent tracking-tight">
                         "Todos"
                     </div>
-                    <nav aria-label="Main Navigation" class="flex items-center gap-4">
-                        <a href="/" class="text-sm font-medium text-slate-500 hover:text-indigo-600 transition-colors duration-200">
-                            "Tasks"
-                        </a>
-                    </nav>
                 </div>
             </header>
-
             <main class="flex-1 w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 flex flex-col">
                 <Todos/>
             </main>
@@ -117,8 +113,6 @@ pub fn App() -> impl IntoView {
 #[component]
 pub fn Todos() -> impl IntoView {
     let (refetch, set_refetch) = signal(0u64);
-
-    // Resource::new_blocking 保证绝对的流式阻塞，服务端查库完成前不输出 HTML，爬虫完美抓取。
     let todos_res = Resource::new_blocking(move || refetch.get(), |_| get_todos());
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
 
@@ -130,17 +124,11 @@ pub fn Todos() -> impl IntoView {
             <h1 id="todo-heading" class="text-xl sm:text-2xl font-bold tracking-tight text-slate-800 text-center mb-1 sm:mb-2">
                 "Task Dashboard"
             </h1>
-            <p class="text-center text-xs sm:text-sm text-slate-400 mb-6 sm:mb-8">
-                "Stay organized. Get things done."
-            </p>
 
             <Show when=move || error_msg.get().is_some()>
                 <div role="alert" class="mb-6 px-4 py-3 bg-red-50 border border-red-200/60 rounded-xl text-sm text-red-600 flex items-center justify-between shadow-sm">
-                    <span class="flex items-center gap-2">
-                        <svg class="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-                        {move || error_msg.get().unwrap_or_default()}
-                    </span>
-                    <button class="ml-3 text-red-400 hover:text-red-600 font-bold text-lg leading-none transition-colors duration-150" on:click=move |_| set_error_msg.set(None)>"×"</button>
+                    <span>{move || error_msg.get().unwrap_or_default()}</span>
+                    <button class="ml-3 text-red-400 hover:text-red-600 font-bold" on:click=move |_| set_error_msg.set(None)>"×"</button>
                 </div>
             </Show>
 
@@ -148,11 +136,7 @@ pub fn Todos() -> impl IntoView {
                 {move || Suspend::new(async move {
                     match todos_res.await {
                         Ok(list) => view! { <TodoManager initial=list set_refetch set_error_msg/> }.into_any(),
-                        Err(e) => view! {
-                            <div class="text-center text-sm text-red-500 my-6 p-4 bg-red-50/60 rounded-xl border border-red-100">
-                                {format!("Error: {}", e)}
-                            </div>
-                        }.into_any(),
+                        Err(e) => view! { <div class="text-center text-red-500 my-6">{format!("Error: {}", e)}</div> }.into_any(),
                     }
                 })}
             </Transition>
@@ -166,23 +150,26 @@ fn TodoManager(
     set_refetch: WriteSignal<u64>,
     set_error_msg: WriteSignal<Option<String>>,
 ) -> impl IntoView {
-    // 转换为原生 Signal 模型
     let initial_rx: Vec<TodoRx> = initial.into_iter().map(TodoRx::from).collect();
-    let todos_sig = RwSignal::new(initial_rx);
 
-    // 【深度响应式应用：create_memo】
-    // 演示真正的细粒度衍生状态：实时计算未完成且未删除的 Todo 数量。
-    // 该 Memo 追踪了 todos_sig、内部的 completed 和 deleted 多个信号维度。
-    let active_count = Memo::new(move |_| {
-        todos_sig
-            .read()
-            .iter()
-            .filter(|t| !t.completed.get() && !t.deleted.get())
-            .count()
+    // 【完美优化 1：彻底消灭 O(N) 遍历计数】
+    // 将计数器作为一个独立的数学变量，而不是依赖数组的衍生计算
+    let initial_count = initial_rx
+        .iter()
+        .filter(|t| !t.completed.get_untracked() && !t.deleted.get_untracked())
+        .count();
+
+    let todos_sig = RwSignal::new(initial_rx);
+    let active_count = RwSignal::new(initial_count);
+    let tombstone_count = RwSignal::new(0usize); // 幽灵节点水位线
+
+    provide_context(TodoContext {
+        todos_sig,
+        active_count,
+        tombstone_count,
     });
 
     let title_ref = NodeRef::<leptos::html::Input>::new();
-
     let handle_err = move |e: ServerFnError| {
         set_error_msg.set(Some(format!("Operation failed: {}", e)));
         set_refetch.update(|n| *n = n.wrapping_add(1));
@@ -226,26 +213,23 @@ fn TodoManager(
 
     view! {
         <div class="mb-5 w-full px-4 py-2.5 bg-linear-to-r from-indigo-50 to-violet-50 rounded-xl border border-indigo-100/60 text-center text-sm font-semibold text-indigo-600 tracking-wide shadow-sm">
+            // 直接读取数字信号，O(1)
             {move || format!("{} active task{}", active_count.get(), if active_count.get() == 1 { "" } else { "s" })}
         </div>
 
         <form
-            class="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-8 sm:mb-10 w-full"
+            class="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-8 w-full"
             on:submit=move |ev| {
                 ev.prevent_default();
                 let value = title_ref.get().map(|el| el.value()).unwrap_or_default().trim().to_string();
                 if !value.is_empty() {
                     let id = Uuid::now_v7();
-
-                    // 【O(1) 内存插入】
-                    // 使用 push (均摊 O(1)) 替代 insert(0) 避免数组平移。
+                    // O(1) 内存插入
                     todos_sig.update(|t| t.push(TodoRx {
-                        id,
-                        title: RwSignal::new(value.clone()),
-                        completed: RwSignal::new(false),
-                        deleted: RwSignal::new(false),
-                        created_at: Utc::now(),
+                        id, title: RwSignal::new(value.clone()), completed: RwSignal::new(false), deleted: RwSignal::new(false), created_at: Utc::now()
                     }));
+                    // O(1) 计数更新
+                    active_count.update(|c| *c += 1);
 
                     add.dispatch((id, value));
                     if let Some(input) = title_ref.get() { input.set_value(""); }
@@ -253,20 +237,13 @@ fn TodoManager(
             }
         >
             <input node_ref=title_ref type="text" placeholder="What needs to be done?"
-                aria-label="New todo title"
-                class="flex-1 px-5 py-3.5 text-base bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-200 shadow-sm hover:shadow-md"
+                class="flex-1 px-5 py-3.5 text-base bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
             />
-            <button type="submit" class="px-6 py-3.5 text-sm font-semibold text-white bg-linear-to-br from-indigo-500 to-violet-500 rounded-xl shadow-md shadow-indigo-500/20 hover:shadow-lg hover:shadow-indigo-500/25 hover:from-indigo-600 hover:to-violet-600 active:scale-[0.97] transition-all duration-200">
-                "Add"
-            </button>
+            <button type="submit" class="px-6 py-3.5 text-sm font-semibold text-white bg-linear-to-br from-indigo-500 to-violet-500 rounded-xl">"Add"</button>
         </form>
 
-        <Show
-            when=move || !todos_sig.read().is_empty()
-            fallback=|| view! { <p class="text-center text-slate-400 text-sm py-8">No tasks yet.</p> }
-        >
-            // CSS flex-col-reverse 将 push 到队尾的新元素在视觉上渲染至最顶部，完美协同底层 O(1)。
-            <ul class="w-full list-none m-0 p-0 flex flex-col-reverse gap-2.5 sm:gap-3">
+        <Show when=move || !todos_sig.read().is_empty()>
+            <ul class="w-full list-none m-0 p-0 flex flex-col-reverse gap-2.5">
                 <For
                     each=move || todos_sig.get()
                     key=|row| row.id
@@ -284,6 +261,9 @@ fn TodoRow(
     delete: Action<Uuid, ()>,
     update: Action<(Uuid, String), ()>,
 ) -> impl IntoView {
+    // 注入上下文以执行 O(1) 的更新和垃圾回收
+    let ctx = expect_context::<TodoContext>();
+
     let id = todo.id;
     let title = todo.title;
     let completed = todo.completed;
@@ -301,16 +281,13 @@ fn TodoRow(
     });
 
     view! {
+        // DOM 的 O(1) 瞬间卸载
         <Show when=move || !deleted.get()>
-            <li
-                class:completed=move || completed.get()
-                class="group w-full flex items-center gap-3 sm:gap-4 p-3 sm:p-4 border border-slate-100 rounded-xl bg-white/80 backdrop-blur-sm transition-all duration-200 hover:bg-white hover:shadow-md hover:border-slate-200/60 active:scale-[0.998]"
-            >
-                <Show
-                    when=move || editing.get()
-                    fallback=move || view! { <TodoDisplay id=id title=title completed=completed toggle=toggle delete=delete deleted=deleted set_editing=set_editing/> }
-                >
-                    <TodoEdit id=id title=title set_editing=set_editing update=update edit_ref=edit_ref/>
+            <li class:completed=move || completed.get() class="group w-full flex items-center gap-3 p-3 border border-slate-100 rounded-xl bg-white/80 transition-all">
+                <Show when=move || editing.get() fallback=move || view! {
+                    <TodoDisplay id title completed toggle delete deleted set_editing ctx/>
+                }>
+                    <TodoEdit id title set_editing update edit_ref/>
                 </Show>
             </li>
         </Show>
@@ -326,32 +303,55 @@ fn TodoDisplay(
     delete: Action<Uuid, ()>,
     deleted: RwSignal<bool>,
     set_editing: WriteSignal<bool>,
+    ctx: TodoContext,
 ) -> impl IntoView {
     view! {
-        <input type="checkbox"
-            aria-label="Toggle completed"
-            class="w-5 h-5 accent-indigo-500 cursor-pointer flex-none transition-transform duration-150 hover:scale-110"
-            prop:checked=move || completed.get()
-            on:click=move |_| {
-                completed.update(|c| *c = !*c);
-                toggle.dispatch(id);
-            }
-        />
-        <span class="flex-1 min-w-0 text-sm sm:text-base text-slate-700 wrap-break-word todo-title leading-relaxed transition-all duration-200">
-            {move || title.get()}
-        </span>
-        <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <button class="p-1.5 text-slate-400 hover:text-indigo-500 rounded-lg hover:bg-indigo-50 transition-colors duration-150" aria-label="Edit todo" on:click=move |_| set_editing.set(true)>
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-            </button>
-            <button class="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors duration-150" aria-label="Delete todo" on:click=move |_| {
-                deleted.set(true);
-                delete.dispatch(id);
-            }>
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-            </button>
-        </div>
-    }
+           <input type="checkbox"
+               class="w-5 h-5 accent-indigo-500 cursor-pointer flex-none"
+               prop:checked=move || completed.get()
+               on:click=move |_| {
+                   let current = completed.get_untracked();
+                   completed.set(!current); // O(1) 状态反转
+
+                   // O(1) 纯数学增减，不遍历数组！
+                   if !current { ctx.active_count.update(|c| *c = c.saturating_sub(1)); }
+                   else { ctx.active_count.update(|c| *c += 1); }
+
+                   toggle.dispatch(id);
+               }
+           />
+    <span
+               class="flex-1 min-w-0 text-sm sm:text-base wrap-break-word transition-all duration-200"
+               class:line-through=move || completed.get()
+               class:text-slate-400=move || completed.get()
+               class:text-slate-700=move || !completed.get()
+           >
+               {move || title.get()}
+           </span>
+           <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100">
+               <button class="p-1.5 text-slate-400 hover:text-indigo-500" on:click=move |_| set_editing.set(true)>"✎"</button>
+               <button class="p-1.5 text-slate-400 hover:text-red-500" on:click=move |_| {
+                   // 1. O(1) UI 隐藏
+                   deleted.set(true);
+
+                   // 2. O(1) 同步活跃计数
+                   if !completed.get_untracked() {
+                       ctx.active_count.update(|c| *c = c.saturating_sub(1));
+                   }
+
+                   // 【完美优化 2：平摊 O(1) 垃圾回收机制 (Tombstone Sweeping)】
+                   // 解决内存泄漏与渲染幽灵节点的负担，同时避免了次次 O(N) 移动数组。
+                   ctx.tombstone_count.update(|c| *c += 1);
+                   if ctx.tombstone_count.get_untracked() >= 30 {
+                       // 当幽灵节点堆积超过 30 个时，集中做一次 O(N) 物理大清理
+                       ctx.todos_sig.update(|t| t.retain(|todo| !todo.deleted.get_untracked()));
+                       ctx.tombstone_count.set(0); // 清空水位线
+                   }
+
+                   delete.dispatch(id);
+               }>"✕"</button>
+           </div>
+       }
 }
 
 #[component]
@@ -364,13 +364,13 @@ fn TodoEdit(
 ) -> impl IntoView {
     view! {
         <input node_ref=edit_ref type="text"
-            class="flex-1 px-3 py-2 text-sm bg-slate-50 border-2 border-indigo-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500/20 transition-all duration-200"
+            class="flex-1 px-3 py-2 text-sm bg-slate-50 border-2 border-indigo-300 rounded-lg focus:outline-none"
             prop:value=move || title.get()
             on:keydown=move |ev| {
                 if ev.key() == "Enter" {
                     let value = edit_ref.get().map(|el| el.value()).unwrap_or_default().trim().to_string();
                     if !value.is_empty() {
-                        title.set(value.clone());
+                        title.set(value.clone()); // O(1)
                         set_editing.set(false);
                         update.dispatch((id, value));
                     }
@@ -378,7 +378,7 @@ fn TodoEdit(
                 else if ev.key() == "Escape" { set_editing.set(false); }
             }
         />
-        <button class="px-4 py-2 text-xs font-semibold text-white bg-indigo-500 rounded-lg hover:bg-indigo-600 active:scale-95 transition-all duration-150 shadow-sm" on:click=move |_| {
+        <button class="px-4 py-2 text-xs font-semibold text-white bg-indigo-500 rounded-lg" on:click=move |_| {
             let value = edit_ref.get().map(|el| el.value()).unwrap_or_default().trim().to_string();
             if !value.is_empty() {
                 title.set(value.clone());
@@ -386,6 +386,6 @@ fn TodoEdit(
                 update.dispatch((id, value));
             }
         }>"Save"</button>
-        <button class="px-3 py-2 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 active:scale-95 transition-all duration-150" on:click=move |_| set_editing.set(false)>"Cancel"</button>
+        <button class="px-3 py-2 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg" on:click=move |_| set_editing.set(false)>"Cancel"</button>
     }
 }
