@@ -8,6 +8,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 leptos = { version = "0.8.0" }
+any_spawner = { version = "0.3", default-features = false, features = ["tokio", "futures-executor"] }
 leptos_router = { version = "0.8.15" }
 reactive_stores = "0.4"
 axum = { version = "0.8.0", optional = true }
@@ -16,10 +17,11 @@ leptos_axum = { version = "0.8.0", optional = true }
 leptos_meta = { version = "0.8.0" }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"], optional = true }
 wasm-bindgen = { version = "0.2.106", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Window", "Location"] }
 serde = { version = "1.0.229", features = ["derive"] }
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.24.0", features = ["v4", "v7", "js", "serde"] }
-sqlx = { version = "0.9.0", optional = true, default-features = false, features = [
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+uuid = { version = "1.24.0", features = ["v4", "v7", "serde"] }
+sqlx = { version = "0.8", optional = true, default-features = false, features = [
     "runtime-tokio",
     "postgres",
     "macros",
@@ -28,12 +30,23 @@ sqlx = { version = "0.9.0", optional = true, default-features = false, features 
     "uuid",
 ] }
 dotenvy = { version = "0.15", optional = true }
+argon2 = { version = "0.5", optional = true }
+rand_core = { version = "0.6", optional = true }
+tower = { version = "0.5", optional = true }
+tower-sessions = { version = "0.14", optional = true }
+tower-sessions-sqlx-store = { version = "0.15", optional = true, features = ["postgres"] }
+axum-login = { version = "0.18.0", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+uuid = { version = "1.24.0", features = ["v4", "v7", "js", "serde"] }
 
 [features]
 hydrate = [
     "leptos/hydrate",
     "dep:console_error_panic_hook",
     "dep:wasm-bindgen",
+    "dep:web-sys",
 ]
 ssr = [
     "dep:axum",
@@ -41,6 +54,12 @@ ssr = [
     "dep:leptos_axum",
     "dep:sqlx",
     "dep:dotenvy",
+    "dep:argon2",
+    "dep:rand_core",
+    "dep:tower",
+    "dep:tower-sessions",
+    "dep:tower-sessions-sqlx-store",
+    "dep:axum-login",
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",

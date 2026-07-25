@@ -25,6 +25,7 @@
 pub mod app;
 // 同理声明并公开 todo 模块（对应 src/todo.rs），里面是数据结构 Todo 和 5 个服务器函数。
 pub mod todo;
+pub mod auth;
 
 // 下面这个函数只在编译 WASM（hydrate 特性）时才存在。
 // 【为什么用 #[cfg(feature = "hydrate")]】：hydrate() 依赖 wasm_bindgen、

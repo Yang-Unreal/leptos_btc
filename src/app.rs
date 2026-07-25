@@ -1,13 +1,27 @@
+use crate::auth::*;
 use crate::todo::*;
 use chrono::Utc;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
+use leptos_router::components::*;
+use leptos_router::path;
 use uuid::Uuid;
 
-// ----------------------------------------------------------------------------
-// 纯原生细粒度模型 (Vanilla Fine-grained Reactivity)
-// 剔除所有冗余的“伪优化”字段，保持模型最纯洁的数据状态
-// ----------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
+// Auth Context — 全应用共享的认证状态
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[derive(Clone)]
+pub struct AuthContext {
+    pub user: Resource<Option<User>>,
+    pub refresh: Action<(), ()>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Todo 纯细粒度模型
+// ═══════════════════════════════════════════════════════════════════════════
+
 #[derive(Clone, Debug)]
 pub struct TodoRx {
     pub id: Uuid,
@@ -27,12 +41,15 @@ impl From<Todo> for TodoRx {
     }
 }
 
-// 全局上下文：只保留最纯粹的数据集和 O(1) 的衍生计数状态
 #[derive(Clone, Copy)]
 struct TodoContext {
     todos_sig: RwSignal<Vec<TodoRx>>,
     active_count: RwSignal<usize>,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shell & App
+// ═══════════════════════════════════════════════════════════════════════════
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -45,20 +62,6 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <HydrationScripts options/>
                 <link rel="icon" href="/icon.svg" media="(prefers-color-scheme: light)" />
                 <link rel="icon" href="/icon-dark.svg" media="(prefers-color-scheme: dark)" />
-
-                <script type="application/ld+json">
-                    {r#"
-                    {
-                      "@context": "https://schema.org",
-                      "@type": "WebApplication",
-                      "name": "Todos",
-                      "url": "https://todos.example.com",
-                      "applicationCategory": "ProductivityApplication",
-                      "operatingSystem": "All",
-                      "description": "A blazingly fast, server-side rendered todo list built with Leptos and Rust."
-                    }
-                    "#}
-                </script>
                 <MetaTags/>
             </head>
             <body>
@@ -71,6 +74,23 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 #[component]
 pub fn App() -> impl IntoView {
     provide_meta_context();
+
+    // ── 认证状态 ────────────────────────────────────────
+    let (refresh_signal, set_refresh_signal) = signal(0);
+    let user_res = Resource::new(
+        move || refresh_signal.get(),
+        |_| async { get_current_user().await.unwrap_or(None) },
+    );
+    let refresh = Action::new(move |_: &()| {
+        let set = set_refresh_signal;
+        async move { set.update(|n| *n += 1) }
+    });
+
+    provide_context(AuthContext {
+        user: user_res,
+        refresh,
+    });
+
     let site_url = "https://todos.example.com";
 
     view! {
@@ -86,24 +106,298 @@ pub fn App() -> impl IntoView {
         <Meta property="og:description" content="A blazingly fast, server-side rendered todo list built with Leptos and Rust."/>
         <Meta property="og:image" content=format!("{}/og-image.jpg", site_url)/>
         <Meta name="twitter:card" content="summary_large_image"/>
-        <Meta name="twitter:title" content="Todos — Fast Full-Stack Todo App"/>
-        <Meta name="twitter:description" content="A blazingly fast, server-side rendered todo list built with Leptos and Rust."/>
-        <Meta name="twitter:image" content=format!("{}/twitter-image.jpg", site_url)/>
 
         <div class="w-full min-h-screen bg-linear-to-b from-slate-50 via-white to-slate-100 font-sans text-slate-800 antialiased flex flex-col">
-            <header class="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
-                <div class="w-full px-4 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between">
-                    <div class="text-lg sm:text-xl font-extrabold bg-linear-to-br from-indigo-600 to-violet-600 bg-clip-text text-transparent tracking-tight">
-                        "Todos"
+            <Router>
+                <header class="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
+                    <div class="w-full px-4 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between">
+                        <a href="/" class="text-lg sm:text-xl font-extrabold bg-linear-to-br from-indigo-600 to-violet-600 bg-clip-text text-transparent tracking-tight">
+                            "Todos"
+                        </a>
+                        <NavMenu/>
                     </div>
-                </div>
-            </header>
-            <main class="flex-1 w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 flex flex-col">
-                <Todos/>
-            </main>
+                </header>
+
+                <main class="flex-1 w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 flex flex-col items-center">
+                    <Routes fallback=|| view! { <div class="mt-10 text-xl font-bold">"404 Not Found"</div> }>
+                        <Route path=path!("/") view=Dashboard/>
+                        <Route path=path!("/login") view=LoginPage/>
+                        <Route path=path!("/register") view=RegisterPage/>
+                    </Routes>
+                </main>
+            </Router>
         </div>
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Navigation
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[component]
+fn NavMenu() -> impl IntoView {
+    let auth = expect_context::<AuthContext>();
+    let auth_for_logout = auth.clone();
+
+    let logout_action = Action::new(move |_: &()| {
+        let a = auth_for_logout.clone();
+        async move {
+            let _ = logout().await;
+            a.refresh.dispatch(());
+        }
+    });
+
+    view! {
+        <Transition fallback=|| view! { <span class="text-sm text-slate-400">"..."</span> }>
+            <Show
+                when=move || {
+                    let u = auth.user.get();
+                    u.is_some() && u.unwrap().is_some()
+                }
+                fallback=|| view! {
+                    <div class="flex items-center gap-3">
+                        <a href="/login"
+                            class="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors">
+                            "Sign In"
+                        </a>
+                        <a href="/register"
+                            class="px-4 py-2 text-sm font-semibold text-indigo-600 hover:text-indigo-700 border border-indigo-200 rounded-lg transition-colors">
+                            "Register"
+                        </a>
+                    </div>
+                }
+            >
+                <div class="flex items-center gap-4">
+                    <span class="text-sm font-medium text-slate-600">
+                        {move || {
+                            auth.user.get()
+                                .and_then(|u| u.map(|u| u.username))
+                                .unwrap_or_default()
+                        }}
+                    </span>
+                    <button
+                        class="text-sm font-medium text-red-500 hover:text-red-700 transition-colors"
+                        on:click=move |_| { logout_action.dispatch(()); }
+                    >
+                        "Logout"
+                    </button>
+                </div>
+            </Show>
+        </Transition>
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Dashboard — 受保护页面
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[component]
+fn Dashboard() -> impl IntoView {
+    let auth = expect_context::<AuthContext>();
+
+    view! {
+        <Transition fallback=|| view! { <div class="mt-10 animate-pulse">"Loading..."</div> }>
+            {move || {
+                match auth.user.get() {
+                    None => view! { <div class="mt-10">"Loading..."</div> }.into_any(),
+                    Some(None) => view! { <Redirect path="/login"/> }.into_any(),
+                    Some(Some(_)) => view! { <Todos/> }.into_any(),
+                }
+            }}
+        </Transition>
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Login Page
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[component]
+fn LoginPage() -> impl IntoView {
+    let auth = expect_context::<AuthContext>();
+    let (error, set_error) = signal(Option::<String>::None);
+    let (pending, set_pending) = signal(false);
+
+    let username_ref = NodeRef::<leptos::html::Input>::new();
+    let password_ref = NodeRef::<leptos::html::Input>::new();
+
+    let do_login = {
+        let auth = auth.clone();
+        move || {
+            let u = username_ref.get().map(|el| el.value()).unwrap_or_default();
+            let p = password_ref.get().map(|el| el.value()).unwrap_or_default();
+            if u.is_empty() || p.is_empty() {
+                set_error.set(Some("Please fill in all fields".into()));
+                return;
+            }
+            let (u, p) = (u, p);
+            let auth = auth.clone();
+            set_pending.set(true);
+            set_error.set(None);
+
+            spawn_local(async move {
+                match login(u, p).await {
+                    Ok(()) => {
+                        auth.refresh.dispatch(());
+                        // 使用浏览器的原生 location API 做页面跳转
+                        #[cfg(target_arch = "wasm32")]
+                        if let Some(win) = web_sys::window() {
+                            let _ = win.location().set_href("/");
+                        }
+                    }
+                    Err(e) => {
+                        set_error.set(Some(e.to_string()));
+                        set_pending.set(false);
+                    }
+                }
+            });
+        }
+    };
+    let do_login = std::rc::Rc::new(do_login);
+
+    view! {
+        <div class="w-full max-w-sm mt-10 bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
+            <h2 class="text-2xl font-bold text-center text-slate-800 mb-6">"Welcome Back"</h2>
+
+            <Show when=move || error.get().is_some()>
+                <div class="mb-5 p-3 bg-red-50 text-red-600 rounded-xl text-sm text-center border border-red-100">
+                    {move || error.get().unwrap()}
+                </div>
+            </Show>
+
+            <div class="flex flex-col gap-4">
+                <input node_ref=username_ref type="text" placeholder="Username or email"
+                    class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/30 focus:outline-none transition-all"
+                    on:keydown={
+                        let d = do_login.clone();
+                        move |ev| { if ev.key() == "Enter" { d(); } }
+                    }/>
+                <input node_ref=password_ref type="password" placeholder="Password"
+                    class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/30 focus:outline-none transition-all"
+                    on:keydown={
+                        let d = do_login.clone();
+                        move |ev| { if ev.key() == "Enter" { d(); } }
+                    }/>
+
+                <button
+                    class="mt-2 px-4 py-3 bg-linear-to-br from-indigo-500 to-violet-600 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95 disabled:opacity-50"
+                    disabled=move || pending.get()
+                    on:click={
+                        let d = do_login.clone();
+                        move |_| d()
+                    }
+                >
+                    {move || if pending.get() { "Signing in..." } else { "Sign In" }}
+                </button>
+
+                <p class="text-center text-sm text-slate-500 mt-2">
+                    "Don't have an account? "
+                    <a href="/register" class="text-indigo-600 hover:underline">"Register"</a>
+                </p>
+            </div>
+        </div>
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Register Page
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[component]
+fn RegisterPage() -> impl IntoView {
+    let (error, set_error) = signal(Option::<String>::None);
+    let (pending, set_pending) = signal(false);
+
+    let username_ref = NodeRef::<leptos::html::Input>::new();
+    let email_ref = NodeRef::<leptos::html::Input>::new();
+    let password_ref = NodeRef::<leptos::html::Input>::new();
+    let confirm_ref = NodeRef::<leptos::html::Input>::new();
+
+    let do_register = {
+        move || {
+            let username = username_ref.get().map(|el| el.value()).unwrap_or_default();
+            let email = email_ref.get().map(|el| el.value()).unwrap_or_default();
+            let password = password_ref.get().map(|el| el.value()).unwrap_or_default();
+            let confirm = confirm_ref.get().map(|el| el.value()).unwrap_or_default();
+
+        if username.is_empty() || email.is_empty() || password.is_empty() {
+            set_error.set(Some("Please fill in all fields".into()));
+            return;
+        }
+        if password != confirm {
+            set_error.set(Some("Passwords do not match".into()));
+            return;
+        }
+        if password.len() < 8 {
+            set_error.set(Some("Password must be at least 8 characters".into()));
+            return;
+        }
+
+        let (username, email, password) = (username, email, password);
+            set_pending.set(true);
+            set_error.set(None);
+
+            spawn_local(async move {
+                match register(username, email, password).await {
+                    Ok(()) => {
+                        #[cfg(target_arch = "wasm32")]
+                        if let Some(win) = web_sys::window() {
+                            let _ = win.location().set_href("/login");
+                        }
+                    }
+                    Err(e) => {
+                        set_error.set(Some(e.to_string()));
+                        set_pending.set(false);
+                    }
+                }
+            });
+        }
+    };
+    let do_register = std::rc::Rc::new(do_register);
+
+    view! {
+        <div class="w-full max-w-sm mt-10 bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
+            <h2 class="text-2xl font-bold text-center text-slate-800 mb-6">"Create Account"</h2>
+
+            <Show when=move || error.get().is_some()>
+                <div class="mb-5 p-3 bg-red-50 text-red-600 rounded-xl text-sm text-center border border-red-100">
+                    {move || error.get().unwrap()}
+                </div>
+            </Show>
+
+            <div class="flex flex-col gap-4">
+                <input node_ref=username_ref type="text" placeholder="Username"
+                    class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/30 focus:outline-none transition-all"/>
+                <input node_ref=email_ref type="email" placeholder="Email"
+                    class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/30 focus:outline-none transition-all"/>
+                <input node_ref=password_ref type="password" placeholder="Password (min 8 chars)"
+                    class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/30 focus:outline-none transition-all"/>
+                <input node_ref=confirm_ref type="password" placeholder="Confirm password"
+                    class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/30 focus:outline-none transition-all"/>
+
+                <button
+                    class="mt-2 px-4 py-3 bg-linear-to-br from-indigo-500 to-violet-600 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95 disabled:opacity-50"
+                    disabled=move || pending.get()
+                    on:click={
+                        let d = do_register.clone();
+                        move |_| d()
+                    }
+                >
+                    {move || if pending.get() { "Creating..." } else { "Create Account" }}
+                </button>
+
+                <p class="text-center text-sm text-slate-500 mt-2">
+                    "Already have an account? "
+                    <a href="/login" class="text-indigo-600 hover:underline">"Sign In"</a>
+                </p>
+            </div>
+        </div>
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Todos 组件（无变化，仅保留原有逻辑）
+// ═══════════════════════════════════════════════════════════════════════════
 
 #[component]
 pub fn Todos() -> impl IntoView {
@@ -143,8 +437,6 @@ fn TodoManager(
     set_error_msg: WriteSignal<Option<String>>,
 ) -> impl IntoView {
     let initial_rx: Vec<TodoRx> = initial.into_iter().map(TodoRx::from).collect();
-
-    // 初始化活跃项计数
     let initial_count = initial_rx
         .iter()
         .filter(|t| !t.completed.get_untracked())
@@ -212,13 +504,10 @@ fn TodoManager(
                 let value = title_ref.get().map(|el| el.value()).unwrap_or_default().trim().to_string();
                 if !value.is_empty() {
                     let id = Uuid::now_v7();
-
-                    // O(1) 插入：直接推入队尾，配合 CSS Flex-col-reverse
                     todos_sig.update(|t| t.push(TodoRx {
                         id, title: RwSignal::new(value.clone()), completed: RwSignal::new(false), created_at: Utc::now()
                     }));
                     active_count.update(|c| *c += 1);
-
                     add.dispatch((id, value));
                     if let Some(input) = title_ref.get() { input.set_value(""); }
                 }
@@ -232,8 +521,6 @@ fn TodoManager(
 
         <Show when=move || !todos_sig.read().is_empty()>
             <ul class="w-full list-none m-0 p-0 flex flex-col-reverse gap-2.5">
-                // 完全信任 Leptos 的 Keyed <For> 组件
-                // 只要这里的 Vec 发生改变，Leptos 会以极高的效率自动定位并卸载 DOM 节点
                 <For
                     each=move || todos_sig.get()
                     key=|row| row.id
@@ -252,7 +539,6 @@ fn TodoRow(
     update: Action<(Uuid, String), ()>,
 ) -> impl IntoView {
     let ctx = expect_context::<TodoContext>();
-
     let id = todo.id;
     let title = todo.title;
     let completed = todo.completed;
@@ -296,15 +582,11 @@ fn TodoDisplay(
             on:click=move |_| {
                 let current = completed.get_untracked();
                 completed.set(!current);
-
-                // 纯数学增减，保持极致性能
                 if !current { ctx.active_count.update(|c| *c = c.saturating_sub(1)); }
                 else { ctx.active_count.update(|c| *c += 1); }
-
                 toggle.dispatch(id);
             }
         />
-
         <span
             class="flex-1 min-w-0 text-sm sm:text-base wrap-break-word transition-all duration-200"
             class:line-through=move || completed.get()
@@ -313,19 +595,11 @@ fn TodoDisplay(
         >
             {move || title.get()}
         </span>
-
         <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100">
             <button class="p-1.5 text-slate-400 hover:text-indigo-500 transition-colors" on:click=move |_| set_editing.set(true)>"✎"</button>
             <button class="p-1.5 text-slate-400 hover:text-red-500 transition-colors" on:click=move |_| {
-                // 【方案 A 的体现】：直接在真实数据源上执行清理，不留任何隐患
-                if !completed.get_untracked() {
-                    ctx.active_count.update(|c| *c = c.saturating_sub(1));
-                }
-
-                // Rust Vec 的 retain 在 Wasm 内存中仅消耗纳秒级，
-                // 随后 Leptos <For> 会根据 ID 的消失，瞬间精准卸载对应的 <li>
+                if !completed.get_untracked() { ctx.active_count.update(|c| *c = c.saturating_sub(1)); }
                 ctx.todos_sig.update(|t| t.retain(|todo| todo.id != id));
-
                 delete.dispatch(id);
             }>"✕"</button>
         </div>
