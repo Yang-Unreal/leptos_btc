@@ -59,6 +59,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+COPY --from=builder /app/Cargo.toml /app/Cargo.toml
+
 # The server binary and the compiled site (HTML, JS, WASM, CSS).
 COPY --from=builder /app/target/release/leptos_btc /app/leptos_btc
 COPY --from=builder /app/target/site /app/site
