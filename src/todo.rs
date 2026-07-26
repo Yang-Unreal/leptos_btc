@@ -10,45 +10,49 @@ pub struct Todo {
     pub title: String,
     pub completed: bool,
     pub created_at: DateTime<Utc>,
+    pub user_id: Uuid,
 }
 
 #[server]
 pub async fn get_todos() -> Result<Vec<Todo>, ServerFnError> {
-    let _auth = require_auth().await?;
+    let user = require_auth().await?;
     let pool = expect_context::<sqlx::PgPool>();
 
     // 【配合 O(1) 策略】改为 ASC 升序查询。
     // 旧数据在前，新数据追加至 Vec 尾部 (push 是均摊 O(1))，
     // 再利用前端 CSS flex-col-reverse 天然逆序展示，将完美实现插入效率最大化。
-    let rows = sqlx::query_as::<_, (Uuid, String, bool, DateTime<Utc>)>(
-        "SELECT id, title, completed, created_at FROM todos ORDER BY created_at ASC",
+    let rows = sqlx::query_as::<_, (Uuid, String, bool, DateTime<Utc>, Uuid)>(
+        "SELECT id, title, completed, created_at, user_id FROM todos WHERE user_id = $1 ORDER BY created_at ASC",
     )
+    .bind(user.id)
     .fetch_all(&pool)
     .await
     .map_err(|e| ServerFnError::new(e.to_string()))?;
 
     Ok(rows
         .into_iter()
-        .map(|(id, title, completed, created_at)| Todo {
+        .map(|(id, title, completed, created_at, user_id)| Todo {
             id,
             title,
             completed,
             created_at,
+            user_id,
         })
         .collect())
 }
 
 #[server]
 pub async fn add_todo(id: Uuid, title: String) -> Result<(), ServerFnError> {
-    let _auth = require_auth().await?;
+    let user = require_auth().await?;
     let title = title.trim().to_string();
     if title.is_empty() {
         return Err(ServerFnError::new("Title cannot be empty"));
     }
     let pool = expect_context::<sqlx::PgPool>();
-    sqlx::query("INSERT INTO todos (id, title) VALUES ($1, $2)")
+    sqlx::query("INSERT INTO todos (id, title, user_id) VALUES ($1, $2, $3)")
         .bind(id)
         .bind(title)
+        .bind(user.id)
         .execute(&pool)
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
@@ -57,10 +61,11 @@ pub async fn add_todo(id: Uuid, title: String) -> Result<(), ServerFnError> {
 
 #[server]
 pub async fn toggle_todo(id: Uuid) -> Result<(), ServerFnError> {
-    let _auth = require_auth().await?;
+    let user = require_auth().await?;
     let pool = expect_context::<sqlx::PgPool>();
-    sqlx::query("UPDATE todos SET completed = NOT completed WHERE id = $1")
+    sqlx::query("UPDATE todos SET completed = NOT completed WHERE id = $1 AND user_id = $2")
         .bind(id)
+        .bind(user.id)
         .execute(&pool)
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
@@ -69,10 +74,11 @@ pub async fn toggle_todo(id: Uuid) -> Result<(), ServerFnError> {
 
 #[server]
 pub async fn delete_todo(id: Uuid) -> Result<(), ServerFnError> {
-    let _auth = require_auth().await?;
+    let user = require_auth().await?;
     let pool = expect_context::<sqlx::PgPool>();
-    sqlx::query("DELETE FROM todos WHERE id = $1")
+    sqlx::query("DELETE FROM todos WHERE id = $1 AND user_id = $2")
         .bind(id)
+        .bind(user.id)
         .execute(&pool)
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
@@ -81,15 +87,16 @@ pub async fn delete_todo(id: Uuid) -> Result<(), ServerFnError> {
 
 #[server]
 pub async fn update_todo(id: Uuid, title: String) -> Result<(), ServerFnError> {
-    let _auth = require_auth().await?;
+    let user = require_auth().await?;
     let title = title.trim().to_string();
     if title.is_empty() {
         return Err(ServerFnError::new("Title cannot be empty"));
     }
     let pool = expect_context::<sqlx::PgPool>();
-    sqlx::query("UPDATE todos SET title = $1 WHERE id = $2")
+    sqlx::query("UPDATE todos SET title = $1 WHERE id = $2 AND user_id = $3")
         .bind(title)
         .bind(id)
+        .bind(user.id)
         .execute(&pool)
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
