@@ -26,19 +26,6 @@ async fn main() {
         .expect("could not connect to Postgres");
 
     // ── 建表 ──────────────────────────────────────────────
-    // todos 业务表
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS todos (
-            id          UUID PRIMARY KEY,
-            title       TEXT NOT NULL,
-            completed   BOOLEAN NOT NULL DEFAULT FALSE,
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            user_id     UUID NOT NULL REFERENCES users(id)
-        )",
-    )
-    .execute(&pool)
-    .await
-    .expect("could not create todos table");
 
     // users 认证表
     sqlx::query(
@@ -54,6 +41,20 @@ async fn main() {
     .await
     .expect("could not create users table");
 
+    // todos 业务表
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS todos (
+            id          UUID PRIMARY KEY,
+            title       TEXT NOT NULL,
+            completed   BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            user_id     UUID NOT NULL REFERENCES users(id)
+        )",
+    )
+    .execute(&pool)
+    .await
+    .expect("could not create todos table");
+
     // ── Session 存储（PostgreSQL 持久化）─────────────────
     let session_store = PostgresStore::new(pool.clone());
     session_store
@@ -62,19 +63,25 @@ async fn main() {
         .expect("Failed to migrate session store");
 
     // 生产环境请将 with_secure(false) 改为 with_secure(true)
-    let session_layer = SessionManagerLayer::new(session_store).with_secure(false);
+    let session_secure: bool = std::env::var("SESSION_SECURE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(false);
+
+    let session_layer = SessionManagerLayer::new(session_store).with_secure(session_secure);
 
     // ── Auth 中间件 ───────────────────────────────────────
     let auth_backend = AuthBackend { pool: pool.clone() };
-    let auth_layer =
-        axum_login::AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
+    let auth_layer = axum_login::AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
 
     let routes = generate_route_list(App);
 
     // ── 路由注册 ──────────────────────────────────────────
     // leptos_routes_with_context 同时注册 SSR 页面路由和 server function 端点。
-    // additional_context 闭包可通过 expect_context::<Parts>() 获取请求 Parts，
-    // 从中提取 axum-login 注入的 AuthSession，再注入 Leptos 上下文。
+    // additional_context 闭包在每个请求的 SSR 渲染前同步执行，
+    // 此处仅注入数据库连接池，供后续 Server Function 通过 expect_context 获取。
+    // 认证状态由 App 组件内 get_current_user() 异步提取后，
+    // 以 AuthContext provide_context 到子组件树。
     let app = Router::new()
         .leptos_routes_with_context(
             &leptos_options,
