@@ -1,12 +1,36 @@
 use crate::auth::*;
 use crate::todo::*;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
 use leptos_router::components::*;
 use leptos_router::path;
 use uuid::Uuid;
+
+// ============================================================================
+// 平台兼容的时间获取
+// ============================================================================
+// 【问题背景】
+// std::time::SystemTime::now() 在 WASM 平台未实现，直接调用会 panic。
+// chrono::Utc::now() 底层依赖 SystemTime::now()，在浏览器中同样会崩溃。
+//
+// 【解决方案】
+// WASM 环境下通过 js_sys::Date::new_0().get_time() 获取 JS 时间戳（毫秒），
+// 再转换为 chrono::DateTime<Utc>，绕过 Rust std 的未实现平台限制。
+
+#[cfg(target_arch = "wasm32")]
+fn now_utc() -> DateTime<Utc> {
+    let now_ms = js_sys::Date::new_0().get_time() as i64;
+    DateTime::from_timestamp_millis(now_ms)
+        .expect("Date::new_0() should return a valid timestamp")
+        .with_timezone(&Utc)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_utc() -> DateTime<Utc> {
+    Utc::now()
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Auth Context — 全应用共享的认证状态
@@ -505,7 +529,7 @@ fn TodoManager(
                 if !value.is_empty() {
                     let id = Uuid::now_v7();
                     todos_sig.update(|t| t.push(TodoRx {
-                        id, title: RwSignal::new(value.clone()), completed: RwSignal::new(false), created_at: Utc::now()
+                        id, title: RwSignal::new(value.clone()), completed: RwSignal::new(false), created_at: now_utc()
                     }));
                     active_count.update(|c| *c += 1);
                     add.dispatch((id, value));
