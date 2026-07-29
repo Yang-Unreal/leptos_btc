@@ -1,29 +1,21 @@
 # syntax=docker/dockerfile:1
 
 # ============================ Build stage ============================
-FROM rust:1-slim AS builder
+FROM rust:1-alpine AS builder
 
-# Build essentials + SSL (axum/tokio need it) + node (for dart-sass & esbuild)
-# `build-essential` + `perl` are required so openssl-sys can compile its
-# vendored OpenSSL from source (FindBin.pm lives in the full perl package).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        pkg-config \
-        libssl-dev \
+RUN apk add --no-cache \
+        build-base \
+        pkgconfig \
+        openssl-dev \
         perl \
         curl \
         nodejs \
-        npm \
-    && rm -rf /var/lib/apt/lists/*
+        npm
 
-# wasm target required by cargo-leptos
 RUN rustup target add wasm32-unknown-unknown
 
 WORKDIR /app
 
-# --- dependency cache layer: copy manifest first, then cargo fetch ---
-# Empty placeholder sources keep the package valid without compiling our code.
-# Cargo.lock is gitignored in this project, so generate it if absent.
 COPY Cargo.toml ./
 RUN mkdir -p src \
     && printf '' > src/lib.rs \
@@ -31,46 +23,34 @@ RUN mkdir -p src \
     && cargo generate-lockfile \
     && cargo fetch
 
-# Build tooling. Installing into PATH means cargo-leptos reuses these
-# binaries instead of trying to download them from GitHub releases
-# (the download step was the source of the earlier timeout error).
 RUN cargo install cargo-leptos --locked --version 0.3.7 \
     && cargo install wasm-bindgen-cli --locked --version 0.2.126
 
-# dart-sass (project uses style/main.scss) and esbuild (JS minification).
-# binaryen provides wasm-opt, which cargo-leptos uses in release builds.
 RUN npm install -g sass esbuild \
-    && apt-get update && apt-get install -y --no-install-recommends binaryen \
-    && rm -rf /var/lib/apt/lists/*
+    && apk add --no-cache binaryen
 
-# --- now the real source and the build ---
 COPY . .
 
-# Build server binary + WASM + site assets in release mode.
 RUN cargo leptos build --release
 
 # ============================ Runtime stage ============================
-FROM debian:bookworm-slim AS runtime
+FROM alpine:3.21 AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
         ca-certificates \
-        libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+        openssl \
+        tzdata
 
 WORKDIR /app
 
 COPY --from=builder /app/Cargo.toml /app/Cargo.toml
-
-# The server binary and the compiled site (HTML, JS, WASM, CSS).
 COPY --from=builder /app/target/release/leptos_btc /app/leptos_btc
 COPY --from=builder /app/target/site /app/site
 
-# Tell the binary where to find assets and what address to bind.
-# site-addr in Cargo.toml is 127.0.0.1:3000; override to 0.0.0.0 so the
-# container is reachable from outside.
 ENV LEPTOS_SITE_ROOT=/app/site
 ENV LEPTOS_SITE_ADDR=0.0.0.0:3000
 ENV LEPTOS_ENV=PROD
+ENV LEPTOS_TAILWIND_VERSION=v4.3.3
 
 EXPOSE 3000
 
