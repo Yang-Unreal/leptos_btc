@@ -41,7 +41,7 @@ async fn main() {
     .await
     .expect("could not create users table");
 
-    // todos 业务表
+    // todos 业务主表
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS todos (
             id          UUID PRIMARY KEY,
@@ -55,6 +55,21 @@ async fn main() {
     .await
     .expect("could not create todos table");
 
+    // subtasks 子任务表 (级联删除)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS subtasks (
+            id          UUID PRIMARY KEY,
+            todo_id     UUID NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+            title       TEXT NOT NULL,
+            completed   BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            user_id     UUID NOT NULL REFERENCES users(id)
+        )",
+    )
+    .execute(&pool)
+    .await
+    .expect("could not create subtasks table");
+
     // ── Session 存储（PostgreSQL 持久化）─────────────────
     let session_store = PostgresStore::new(pool.clone());
     session_store
@@ -62,7 +77,6 @@ async fn main() {
         .await
         .expect("Failed to migrate session store");
 
-    // 生产环境请将 with_secure(false) 改为 with_secure(true)
     let session_secure: bool = std::env::var("SESSION_SECURE")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -76,12 +90,6 @@ async fn main() {
 
     let routes = generate_route_list(App);
 
-    // ── 路由注册 ──────────────────────────────────────────
-    // leptos_routes_with_context 同时注册 SSR 页面路由和 server function 端点。
-    // additional_context 闭包在每个请求的 SSR 渲染前同步执行，
-    // 此处仅注入数据库连接池，供后续 Server Function 通过 expect_context 获取。
-    // 认证状态由 App 组件内 get_current_user() 异步提取后，
-    // 以 AuthContext provide_context 到子组件树。
     let app = Router::new()
         .leptos_routes_with_context(
             &leptos_options,
