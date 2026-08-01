@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ============================ Build stage ============================
-FROM rust:1-alpine AS builder
+FROM rust:1.97.1-alpine3.24 AS builder
 
 RUN apk add --no-cache \
         build-base \
@@ -34,7 +34,7 @@ COPY . .
 RUN cargo leptos build --release
 
 # ============================ Runtime stage ============================
-FROM alpine:3.21 AS runtime
+FROM alpine:3.24 AS runtime
 
 RUN apk add --no-cache \
         ca-certificates \

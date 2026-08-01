@@ -1,10 +1,43 @@
+# Rust build artifacts
 target/
+target-wasm/
+*.wasm
+
+# Git
 .git/
 .gitignore
-Cargo.lock.bak
-*.log
-end2end/
-dokploy/
-.dockerignore
-.env
 
+# Cargo
+Cargo.lock.bak
+.cargo/
+.cache/
+
+# Logs
+*.log
+*.tmp
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Leptos/Node build artifacts
+node_modules/
+.pnpm-store/
+npm-debug.log*
+
+# End-to-end tests
+end2end/
+playwright-report/
+test-results/
+
+# Documentation drafts
+*.md.bak
